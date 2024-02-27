@@ -59,14 +59,20 @@ dl_log <- c("SFED","MFED") |>
     }
   )
 
-df_dl_log <- dl_log %>%
+df_dl_log <- dl_log |>
   list_rbind()
 
-temp_csv_file <- file.path(tempdir(), "FloodScan_zip_DL_log.csv")
-drive_dribble
-drive_upload(
-    media = temp_csv_file,
-    path = drive_dribble[drive_dribble$name =="FloodScan",]$id,
+# write csv to temp
+write_csv(df_dl_log,
+          file = temp_csv_file <- file.path(
+            tempdir(),
+            "FloodScan_zip_DL_log.csv"
+          )
+)
 
-    name = basename(temp_csv_file)
-  )
+# upload csv to temp
+drive_upload(
+  media = temp_csv_file,
+  path = as_id(drive_dribble[drive_dribble$name =="FloodScan",]$id),
+  name = basename(temp_csv_file)
+)
