@@ -10,9 +10,9 @@ drive_auth(
 drive_dribble <- drive_ls(
   corpus = "user"
 )
-
+file_name_DL_log <- "FloodScan_zip_DL_log.csv"
 # Get Download Log If initiated
-# file_name_DL_log <- "FloodScan_zip_DL_log.csv"
+
 # dl_log_id <- drive_dribble[drive_dribble$name==file_name_DL_log,]$id
 # dl_log_initiated <- length(dl_log_id)>0
 #
