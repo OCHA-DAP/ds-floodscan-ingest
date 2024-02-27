@@ -1,5 +1,6 @@
 library(googledrive)
 library(purrr)
+library(readr)
 
 drive_auth(
   path=Sys.getenv("FS_SA_JSON")
@@ -12,7 +13,6 @@ drive_dribble <- drive_ls(
 run_date <- Sys.Date()
 run_date_chr <- format(latest_file_date,"%Y%m%d")
 
-
 dl_log <- c("SFED","MFED") |>
   purrr::map(
     \(frac_type){
@@ -20,7 +20,6 @@ dl_log <- c("SFED","MFED") |>
       TMP_PATH <- file.path(tempdir(), TMP_NAME)
       DL_VAR <- paste0("FLOODSCAN_",frac_type,"_URL")
       DL_URL <- Sys.getenv(DL_VAR)
-
 
       cat("Downloading " , frac_type,"\n")
       download.file(DL_URL,TMP_PATH, quiet=TRUE)
@@ -58,4 +57,16 @@ dl_log <- c("SFED","MFED") |>
       unlink(TMP_PATH)
       return(dl_log)
     }
+  )
+
+df_dl_log <- dl_log %>%
+  list_rbind()
+
+temp_csv_file <- file.path(tempdir(), "FloodScan_zip_DL_log.csv")
+drive_dribble
+drive_upload(
+    media = temp_csv_file,
+    path = drive_dribble[drive_dribble$name =="FloodScan",]$id,
+
+    name = basename(temp_csv_file)
   )
