@@ -20,11 +20,12 @@ jobs:
           r-version: '4.x'
       - uses: r-lib/actions/setup-pandoc@v2
 
-      # - name: Install System Dependencies
-      #   run: |
-      #     sudo apt-get update
-      #     sudo apt-get install -y \
-      #       libxml2-dev \
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+              libcurl4-openssl-dev\
+              libxml2-dev
       #       libgdal-dev \
       #       libproj-dev \
       #       libgeos-dev \
