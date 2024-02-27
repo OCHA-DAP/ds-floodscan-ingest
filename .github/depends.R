@@ -18,6 +18,3 @@ install.packages(
     "googledrive",
     "readr")
 )
-
-
-
