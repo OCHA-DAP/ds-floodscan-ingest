@@ -50,11 +50,11 @@ jobs:
         run: |
           Rscript .github/depends.R
 
-      - name: Run floodscan-download
-        run: |
-          source(file.path("src", "DL_zips.R"))
-        shell: Rscript {0}
-        env:
-          FS_SA_JSON: "sa_auth.json"
-          FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
-          FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+      # - name: Run floodscan-download
+      #   run: |
+      #     source(file.path("src", "DL_zips.R"))
+      #   shell: Rscript {0}
+      #   env:
+      #     FS_SA_JSON: "sa_auth.json"
+      #     FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
+      #     FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}

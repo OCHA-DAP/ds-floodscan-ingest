@@ -11,7 +11,7 @@ drive_dribble <- drive_ls(
 )
 
 run_date <- Sys.Date()
-run_date_chr <- format(latest_file_date,"%Y%m%d")
+run_date_chr <- format(run_date,"%Y%m%d")
 
 dl_log <- c("SFED","MFED") |>
   purrr::map(
@@ -30,7 +30,8 @@ dl_log <- c("SFED","MFED") |>
       yyyymmdd_filt <- yyyymmdd[!is.na(yyyymmdd)]
 
       yyyymmdd_dates <- as.Date(yyyymmdd_filt, format = "%Y%m%d")
-      latest_file_date_chr <- format(latest_file_date,"%Y%m%d")
+
+      latest_file_date_chr <- format(max(yyyymmdd_dates),"%Y%m%d")
 
       file_name_zip <- paste0("aer_floodscan_",
                               tolower(frac_type),
@@ -62,11 +63,40 @@ dl_log <- c("SFED","MFED") |>
 df_dl_log <- dl_log |>
   list_rbind()
 
+# dplyr::anti_join(
+#   df_dl_log,
+#                  df_dl_log |>
+#                    dplyr::mutate(download_date= lubridate::as_date("2024-02-25"))
+#                  )
+# df_dl_log[[-c("download_date")]]
+# df_dl_log |>
+#   mutate(
+#     max_date
+#   )
+# merge(df_dl_log,df_dl_log,all = T)
+# # file_name_DL_log <- "FloodScan_zip_DL_log.csv"
+#
+# drive_download(
+#   file = as_id(drive_dribble[drive_dribble$nane==file_name_DL_log]$id),
+#   path = f<- tempfile(fileext = ".csv")
+#                )
+# previous_dl_log <- read_csv(f)
+
+# drive_download(aoi_drive,
+#                path = f <- tempfile(fileext = ".rds")
+#                )
+# drive_download(file = ,
+#                path = as_id(
+#   drive_dribble[drive_dribble$name ==file_name_DL_log]$id
+#   ),
+#   type = ,
+#   overwrite = ,verbose = )
+
 # write csv to temp
 write_csv(df_dl_log,
           file = temp_csv_file <- file.path(
             tempdir(),
-            "FloodScan_zip_DL_log.csv"
+            file_name_DL_log
           )
 )
 

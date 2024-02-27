@@ -13,9 +13,12 @@
 
 install.packages(
   c(
+    "dplyr",
     "purrr",
     "googledrive",
-    "readr")
+    "readr",
+    "stringr"
+    )
 )
 
 
