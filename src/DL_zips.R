@@ -13,25 +13,19 @@ drive_dribble <- drive_ls(
 file_name_DL_log <- "FloodScan_zip_DL_log.csv"
 # Get Download Log If initiated
 
-# dl_log_id <- drive_dribble[drive_dribble$name==file_name_DL_log,]$id
-# dl_log_initiated <- length(dl_log_id)>0
-#
-# if(dl_log_initiated){
-#   drive_download(
-#     file = as_id(
-#       dl_log_id
-#     ),
-#     path = f <- tempfile(fileext = ".csv")
-#   )
-#
-#   previous_dl_log <- read_csv(f)
-#
-#   # remove these cols
-#   previous_dl_log_compare <-  previous_dl_log |>
-#     select(-any_of(c("download_date","update_available")))
-#
-# }
-#
+dl_log_id <- drive_dribble[drive_dribble$name==file_name_DL_log,]$id
+drive_download(
+  file = as_id(
+    dl_log_id
+  ),
+  path = f <- tempfile(fileext = ".csv")
+)
+
+
+previous_dl_log <- read_csv(f)
+
+previous_dl_log_compare <-  previous_dl_log |>
+  select(-any_of(c("update_available","download_date")))
 
 
 run_date <- Sys.Date()
@@ -40,6 +34,7 @@ run_date_chr <- format(run_date,"%Y%m%d")
 dl_log <- c("SFED","MFED") |>
   purrr::map(
     \(frac_type){
+
       TMP_NAME <-  paste0("FloodScan_",frac_type,"_90d_",run_date_chr,".zip")
       TMP_PATH <- file.path(tempdir(), TMP_NAME)
       DL_VAR <- paste0("FLOODSCAN_",frac_type,"_URL")
@@ -64,7 +59,7 @@ dl_log <- c("SFED","MFED") |>
                               ".zip")
 
       drive_target_dir_id <- drive_dribble[drive_dribble$name == paste0(frac_type,"_zips"),]$id
-      cat("Uploading " , frac_type,"to drive\n")
+
 
       dl_log <- data.frame(
         file_name = file_name_zip,
@@ -74,12 +69,27 @@ dl_log <- c("SFED","MFED") |>
         type = frac_type,
         update_available =T
       )
+      df_dl_log_new <- anti_join(dl_log,previous_dl_log_compare)
+      new_records <- nrow(df_dl_log_new)>0
+      if(!new_records){
+        cat("no new records \n")
+        dl_log <- dl_log |>
+          mutate(
+            update_available =F
+          )
+      }
 
+      # if new records add to drive
+      if(new_records){
+        cat("New records: uploading " , frac_type,"to drive\n")
         drive_upload(
           media = TMP_PATH,
           path = as_id(drive_target_dir_id),
           name = file_name_zip
         )
+
+      }
+
 
       unlink(TMP_PATH)
       return(dl_log)
@@ -89,19 +99,15 @@ dl_log <- c("SFED","MFED") |>
 df_dl_log <- dl_log |>
   list_rbind()
 
-# if(dl_log_initiated){
-#
-# }
-#
-# current_dl_log_compare<- df_dl_log |>
-#   select(-download_date)
-#
-#
-#
-# new_record_log_df <- dplyr::anti_join(
-#   current_dl_log_compare,
-#   previous_dl_log_compare
-#   )
+new_record_log_df <- dplyr::anti_join(
+  df_dl_log,
+  previous_dl_log_compare
+  )
+
+dl_log_updated <- bind_rows(
+  df_dl_log,
+  previous_dl_log
+)
 # if(nrow(new_record_log_df)){
 #
 # }
@@ -126,7 +132,7 @@ df_dl_log <- dl_log |>
 #   overwrite = ,verbose = )
 
 # write csv to temp
-write_csv(df_dl_log,
+write_csv(dl_log_updated,
           file = temp_csv_file <- file.path(
             tempdir(),
             file_name_DL_log
