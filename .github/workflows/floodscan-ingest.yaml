@@ -1,12 +1,11 @@
-# This workflow uses actions to automatically run the NGA - Gauge/Flood Monitoring
-# script.
+# This workflow uses actions to automatically download 90d rotating Africa FloodScan zip files.
 
 name: floodscan-download
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 22 * * *' # Run every day at 10 pm
+    - cron: '0 23 * * *' # Run every day at 11 pm
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -20,11 +19,12 @@ jobs:
           r-version: '4.x'
       - uses: r-lib/actions/setup-pandoc@v2
 
-      # - name: Install System Dependencies
-      #   run: |
-      #     sudo apt-get update
-      #     sudo apt-get install -y \
-      #       libxml2-dev \
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+              libcurl4-openssl-dev\
+              libxml2-dev
       #       libgdal-dev \
       #       libproj-dev \
       #       libgeos-dev \
@@ -34,7 +34,7 @@ jobs:
         id: create-json
         uses: jsdaniell/create-json@v1.2.2
         with:
-          name: "auth.json"
+          name: "sa_auth.json"
           json: ${{ secrets.GCP_CREDENTIALS }}
 
       - name: Cache R dependencies
@@ -49,11 +49,14 @@ jobs:
         run: |
           Rscript .github/depends.R
 
-      # - name: Run floodscan-download
-      #   run: |
-      #     source(file.path("src", "DL_zips.R"))
-      #   shell: Rscript {0}
-      #   env:
-      #     GFF_JSON: "sa_auth.json"
-      #     FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
-      #     FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+
+      - name: Run floodscan-download
+        run: |
+          source(file.path("src", "DL_zips.R"))
+        shell: Rscript {0}
+        env:
+          FS_SA_JSON: "sa_auth.json"
+          FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
+          FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+
+
