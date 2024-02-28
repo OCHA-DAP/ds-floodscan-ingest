@@ -3,6 +3,9 @@ library(purrr)
 library(readr)
 library(dplyr)
 
+# good for testing log
+upload_to_drive <- c(T,F)[1]
+
 drive_auth(
   path=Sys.getenv("FS_SA_JSON")
 )
@@ -69,6 +72,7 @@ dl_log <- c("SFED","MFED") |>
         type = frac_type,
         update_available =T
       )
+
       df_dl_log_new <- anti_join(dl_log,previous_dl_log_compare)
       new_records <- nrow(df_dl_log_new)>0
       if(!new_records){
@@ -82,15 +86,16 @@ dl_log <- c("SFED","MFED") |>
       # if new records add to drive
       if(new_records){
         cat("New records: uploading " , frac_type,"to drive\n")
-        drive_upload(
-          media = TMP_PATH,
-          path = as_id(drive_target_dir_id),
-          name = file_name_zip
-        )
+        if(upload_to_drive){
+          drive_upload(
+            media = TMP_PATH,
+            path = as_id(drive_target_dir_id),
+            name = file_name_zip
+          )
+        }
+
 
       }
-
-
       unlink(TMP_PATH)
       return(dl_log)
     }
@@ -99,37 +104,18 @@ dl_log <- c("SFED","MFED") |>
 df_dl_log <- dl_log |>
   list_rbind()
 
-new_record_log_df <- dplyr::anti_join(
-  df_dl_log,
-  previous_dl_log_compare
+if(unique(df_dl_log$download_date) != max(previous_dl_log$download_date)){
+  new_record_log_df <- dplyr::anti_join(
+    df_dl_log,
+    previous_dl_log
   )
 
+}
+
 dl_log_updated <- bind_rows(
-  df_dl_log,
-  previous_dl_log
+  previous_dl_log,
+  new_record_log_df
 )
-# if(nrow(new_record_log_df)){
-#
-# }
-# df_dl_log[[-c("download_date")]]
-# df_dl_log |>
-#   mutate(
-#     max_date
-#   )
-# merge(df_dl_log,df_dl_log,all = T)
-
-#
-
-
-# drive_download(aoi_drive,
-#                path = f <- tempfile(fileext = ".rds")
-#                )
-# drive_download(file = ,
-#                path = as_id(
-#   drive_dribble[drive_dribble$name ==file_name_DL_log]$id
-#   ),
-#   type = ,
-#   overwrite = ,verbose = )
 
 # write csv to temp
 write_csv(dl_log_updated,
@@ -140,8 +126,12 @@ write_csv(dl_log_updated,
 )
 
 # upload csv to temp
-drive_upload(
-  media = temp_csv_file,
-  path = as_id(drive_dribble[drive_dribble$name =="FloodScan",]$id),
-  name = basename(temp_csv_file)
-)
+if(upload_to_drive){
+  drive_upload(
+    media = temp_csv_file,
+    path = as_id(drive_dribble[drive_dribble$name =="FloodScan",]$id),
+    name = basename(temp_csv_file),
+    overwrite = T
+  )
+}
+
