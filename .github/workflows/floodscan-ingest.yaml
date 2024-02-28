@@ -1,5 +1,4 @@
-# This workflow uses actions to automatically run the NGA - Gauge/Flood Monitoring
-# script.
+# This workflow uses actions to automatically download 90d rotating Africa FloodScan zip files.
 
 name: floodscan-download
 
@@ -7,7 +6,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 23 * * *' # Run every day at 11 pm
-
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -20,7 +18,7 @@ jobs:
         with:
           r-version: '4.x'
       - uses: r-lib/actions/setup-pandoc@v2
-      
+
       - name: Install System Dependencies
         run: |
           sudo apt-get update
