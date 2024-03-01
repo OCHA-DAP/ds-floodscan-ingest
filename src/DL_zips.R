@@ -31,7 +31,6 @@ previous_dl_log <- read_csv(f)
 
 
 
-
 previous_dl_log_compare <-  previous_dl_log |>
   select(-any_of(c("update_available","download_date")))
 
@@ -42,7 +41,7 @@ run_date_chr <- format(run_date,"%Y%m%d")
 dl_log <- c("SFED","MFED") |>
   purrr::map(
     \(frac_type){
-      frac_type <- "SFED"
+      # frac_type <- "SFED"
 
       TMP_NAME <-  paste0("FloodScan_",frac_type,"_90d_",run_date_chr,".zip")
       TMP_PATH <- file.path(tempdir(), TMP_NAME)
@@ -96,7 +95,8 @@ dl_log <- c("SFED","MFED") |>
           drive_upload(
             media = TMP_PATH,
             path = as_id(drive_target_dir_id),
-            name = file_name_zip
+            name = file_name_zip,
+            overwrite = T
           )
         }
 
@@ -139,5 +139,29 @@ if(upload_to_drive){
     name = basename(temp_csv_file),
     overwrite = T
   )
+
+
 }
+
+
+# google drive not syncing so have to access programmaticaly for troubleshooting log.
+# write csv to temp
+# write_csv(previous_dl_log |>
+#             filter(download_date!="2024-03-01"),
+#           file = temp_csv_file <- file.path(
+#             tempdir(),
+#             file_name_DL_log
+#           )
+# )
+#
+# # upload csv to temp
+# if(upload_to_drive){
+#   drive_upload(
+#     media = temp_csv_file,
+#     path = as_id(drive_dribble[drive_dribble$name =="FloodScan",]$id),
+#     name = basename(temp_csv_file),
+#     overwrite = T
+#   )
+#
+# }
 
