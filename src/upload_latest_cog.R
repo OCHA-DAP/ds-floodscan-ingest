@@ -2,6 +2,7 @@ library(purrr)
 library(readr)
 library(dplyr)
 library(terra)
+library(stringr)
 
 
 run_date <- Sys.Date()
@@ -48,7 +49,7 @@ lr <- c("SFED","MFED") |>
     }
   )
 
-r <- terra::rast(lr)
+r <- rast(lr)
 src_name <- str_remove(basename(terra::sources(r)[1]),"sfed_|mfed_")
 
 cumulus::write_az_file(
