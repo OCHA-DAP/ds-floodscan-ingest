@@ -1,7 +1,7 @@
 # This workflow uses actions to automatically download 90d rotating Africa FloodScan zip files.
 # It then unzips the file grabs the SFED , MFED and merges them into cOG
 
-name: floodscan-download
+name: floodscan-cogs
 
 on:
   workflow_dispatch:
@@ -48,15 +48,17 @@ jobs:
       - name: Install R dependencies
         if: steps.cache-r-deps.outputs.cache-hit != 'true'
         run: |
-          Rscript .github/depends.R
+          Rscript .github/depends2.R
 
-      - name: Run floodscan-download
-        run: |
-          source(file.path("src", "DL_zips.R"))
-        shell: Rscript {0}
-        env:
-          FS_SA_JSON: "sa_auth.json"
-          FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
-          FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+
+      # - name: Run floodscan-cogs
+      #   run: |
+      #     # source(file.path("src", "DL_zips.R"))
+      #     source(file.path("src", "upload_latest_cog.R"))
+      #   shell: Rscript {0}
+      #   env:
+      #     FS_SA_JSON: "sa_auth.json"
+      #     FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
+      #     FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
 
 
