@@ -109,30 +109,48 @@ cog_dir_out <- file.path(
   "glb",
   "floodscan_cogs"
 )
+df_tif_lookup$date |> range()
 
 map(
   day_seq,
   \(dt){
+    print(as_date(dt))
     df_tif_tmp <- df_tif_lookup |>
       filter(
         date==dt
       )
     df_split <- split(df_tif_tmp,df_tif_tmp$band)
 
-    r_sfed <- rast(df_split$sfed$full)
-    time(r_sfed) <- as_date(df_split$sfed$date)
-    set.names(r_sfed,"SFED")
 
-    r_mfed <- rast(df_split$mfed$full)
-    time(r_mfed) <- as_date(df_split$mfed$date)
-    set.names(r_mfed,"MFED")
-    r_joined <- rast(
-      list(r_sfed,r_mfed)
-    )
+      lr_processed <- map(
+        set_names(df_split,names(df_split)),
+        \(dft){
+          r <- rast(dft$full)
+          time(r) <- as_date(dft$date)
+          set.names(r,toupper(dft$band))
+          r
+
+        }
+      )
+      r_processed <- rast(
+        lr_processed
+      )
+
+#
+#     r_sfed <- rast(df_split$sfed$full)
+#     time(r_sfed) <- as_date(df_split$sfed$date)
+#     set.names(r_sfed,"SFED")
+#
+#     r_mfed <- rast(df_split$mfed$full)
+#     time(r_mfed) <- as_date(df_split$mfed$date)
+#     set.names(r_mfed,"MFED")
+
+
     out_fn <- str_remove(df_split$sfed$base,"_sfed")
-    terra::writeRaster(r_joined,
+    terra::writeRaster(r_processed,
                        filename = file.path(cog_dir_out,out_fn),
                        filetype = "COG",
+                       overwrite= TRUE,
                        gdal = c("COMPRESS=DEFLATE",
                                 "SPARSE_OK=YES",
                                 "OVERVIEW_RESAMPLING=AVERAGE")
