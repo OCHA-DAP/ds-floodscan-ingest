@@ -50,15 +50,14 @@ jobs:
         run: |
           Rscript .github/depends2.R
 
-
-      # - name: Run floodscan-cogs
-      #   run: |
-      #     # source(file.path("src", "DL_zips.R"))
-      #     source(file.path("src", "upload_latest_cog.R"))
-      #   shell: Rscript {0}
-      #   env:
-      #     FS_SA_JSON: "sa_auth.json"
-      #     FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
-      #     FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+      - name: Run floodscan-cogs
+        run: |
+          source(file.path("src", "upload_latest_cog.R"))
+        shell: Rscript {0}
+        env:
+          DSCI_AZ_SAS_DEV: ${{ secrets.DSCI_AZ_SAS_DEV }}
+          DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
+          FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
+          FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
 
 
