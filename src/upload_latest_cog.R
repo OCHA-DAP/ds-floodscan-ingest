@@ -1,6 +1,7 @@
 library(purrr)
 library(readr)
 library(dplyr)
+library(terra)
 
 
 run_date <- Sys.Date()
@@ -26,7 +27,7 @@ lr <- c("SFED","MFED") |>
         mutate(
           yyyymmdd = stringr::str_extract(Name,
                                           pattern = "\\d{8}") ,
-          date_tif = as_date(yyyymmdd,format = "%Y%m%d")
+          date_tif = as.Date(yyyymmdd,format = "%Y%m%d")
         )
 
       df_most_recent <- tif_meta |>
