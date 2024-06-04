@@ -3,10 +3,36 @@ library(readr)
 library(dplyr)
 library(terra)
 library(stringr)
-
+library(cumulus)
 
 run_date <- Sys.Date()
 run_date_chr <- format(run_date,"%Y%m%d")
+
+
+df_cogs_meta <- cumulus::list_contents(
+  container = "global",
+  dir = "raster/cogs"
+)
+
+
+df_aer_meta_latest <- df_cogs_meta |>
+  filter(
+    str_detect(basename(name),"aer_")
+  ) |>
+  mutate(
+    date = as.Date(str_extract(basename(name),"\\d{8}"),format = "%Y%m%d")
+  ) |>
+  filter(
+    date == max(date)
+  )
+
+get_aer_url <-  function(band, date){
+
+}
+
+date_latest_blob <- df_aer_meta_latest$date
+
+
 
 lr <- c("SFED","MFED") |>
   purrr::map(
@@ -23,7 +49,7 @@ lr <- c("SFED","MFED") |>
 
       tif_meta <- tibble(
         unzip(TMP_PATH,list=T)
-        )|>
+      )|>
         select(Name) |>
         mutate(
           yyyymmdd = stringr::str_extract(Name,
@@ -32,7 +58,13 @@ lr <- c("SFED","MFED") |>
         )
 
       df_most_recent <- tif_meta |>
-        filter(date_tif ==max(date_tif,na.rm=T))
+        filter(
+          date_tif %in%(date_latest_blob+1)
+        )
+
+      if(nrow(df_most_recent)==0){
+        stop("No new ", frac_type, " data")
+      }
 
       unzip(
         TMP_PATH,
@@ -43,22 +75,24 @@ lr <- c("SFED","MFED") |>
         td,
         df_most_recent$Name
       )
+
       r <- terra::rast(tf)
       terra::set.names(r,frac_type)
       r
     }
   )
 
+
 r <- rast(lr)
 src_name <- str_remove(basename(terra::sources(r)[1]),"sfed_|mfed_")
 
 cumulus::write_az_file(
-        service = "blob",
-        stage = "dev",
-        x = r,
-        name = paste0("raster/cogs/",src_name),
-        container = "global",
-        endpoint_template =  Sys.getenv("DSCI_AZ_ENDPOINT"),
-        sas_key = Sys.getenv("DSCI_AZ_SAS_DEV")
-      )
+  service = "blob",
+  stage = "dev",
+  x = r,
+  name = paste0("raster/cogs/",src_name),
+  container = "global",
+  endpoint_template =  Sys.getenv("DSCI_AZ_ENDPOINT"),
+  sas_key = Sys.getenv("DSCI_AZ_SAS_DEV")
+)
 
