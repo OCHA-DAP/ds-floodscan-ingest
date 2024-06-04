@@ -1,0 +1,692 @@
+---
+title: FloodScan Threshold Exploration
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+    embed-resoures: true
+    smooth-scroll: true
+execute:
+  include: true
+  echo: true
+  warning: false
+  message: false
+  eval: false
+  results: "asis"
+  out.width: "100%"
+  code-fold: true
+editor: visual
+project:
+  execute-dir: project
+---
+
+**NOTE - unfinished analysis**
+
+## Intro
+
+This analysis is centered around 2 objectives:
+
+1.  understanding thresholds which could be used to create derivative products for sharing of AER FloodScan data through HDX
+2.  general understanding of how thresholds/threshold might effect our teams analyses of FloodScan + other data sources.
+
+**Key Takeaways/Next Steps** - 4 options presented in **section: 4 options -** 
+
+- 20 % threshold for is a poor approximation of flood extent in the case of flash floods in Baidoa, Somalia Good chance of missing flood events 
+- 20 % threshold captures some of flooding that occurred in Sofala Province Mozambique (Cyclone Idai), but probably provides a poor approximation of flood extent. 
+- with regards to objective 1 - our audience will likely just use the files as flood extents therefore we do no want to provide misleading/misrepresentation of that extent.
+- With regards to objective 1, the data sharing stipulation is a bit unclear making it hard to know the best product we can share. Current stipulation is we "can share a derivative product, but not the raw data." 
++ Threshold binary product shown below is clearly inferior and potentially and could lead to poor decision making. + Can we just take the raw product and mask out the very low values? technically this is a derivative product, but it's not clear if this is allowed. + Can we just take the raw product and set a much lower threshold (i.e) 2 % before making binary? technically this is a derivative product, but it's not clear if this is allowed. + Can we aggregate the raw product with a 3 cell zonal window average? Technically this is a derivative product, but it's not clear if this is allowed. - With regards to objective 2: + preliminary look indicates threshold may be useful in signal detection for monitoring (i.e removing noise), but there are probably better ways our team can do this. - **Next Steps** + Finish Idai "Raw" vs Binary product comparison + Explore any other type of derivative product that could be permitted (like the 3 above?)
+
+## Case Sudy 1: Somalia Baidoa OND 2020
+
+-   I believe there was a lot of flooding this year (not sure about OND vs MAM)
+-   Baidoa is a region that experiences **flash floods** so it's a specific use case for the data
+
+```{r setupLoad}
+#| eval: true
+
+library(terra)
+library(sf)
+library(tidyverse)
+library(tidync)
+library(tidyterra)
+library(gghdx)
+# library(here)
+library(patchwork)
+library(glue)
+library(janitor)
+
+box::use(dl_admin =../R/utils)
+box::use(fs = ../R/fs_load_utils_tidync)
+
+
+fp_fs <- file.path(
+  Sys.getenv("AA_DATA_DIR"),
+  "private",
+  "raw",
+  "glb",
+  "floodscan",
+  "floodscan_flooded_fraction_africa_19980112-20221231_p00",
+  "aer_sfed_area_300s_19980112_20221231_v05r01.nc"
+)
+
+# load field maps
+gdf_moz_adm <- dl_admin$download_fieldmaps_sf(
+  iso3 = "moz",
+  layer = c("moz_adm0","moz_adm1")
+  )
+
+gdf_som_adm <- dl_admin$download_fieldmaps_sf(
+  iso3 = "som",
+  layer = "som_adm2"
+  ) 
+
+gdf_moz_adm0 <- gdf_moz_adm$moz_adm0
+gdf_moz_sofala <-  gdf_moz_adm$moz_adm1 |> 
+  clean_names() |> 
+  rename(
+    adm1_en = "adm1_pt" 
+  ) |> 
+  filter(adm0_pcode=="MZ",adm1_en=="Sofala")
+
+
+gdf_baidoa_adm2 <- gdf_som_adm$som_adm2 |> 
+  clean_names() |> 
+  filter(
+    adm0_pcode=="SO",
+    adm2_en=="Baydhaba"
+    ) 
+
+tnc_fs <- tidync(fp_fs)
+
+tnc_fs_baidoa <- fs$fs_filter_bounds(fs_obj = tnc_fs,
+                                geometry =gdf_baidoa_adm2
+                                )
+
+tnc_fs_moz <- fs$fs_filter_bounds(fs_obj = tnc_fs,
+                                geometry =gdf_moz_sofala
+                                )
+
+r_fs_baidoa <- fs$fs_to_raster(fs_obj = tnc_fs_baidoa,band = "SFED_AREA")
+r_fs_moz <- fs$fs_to_raster(fs_obj = tnc_fs_moz,band = "SFED_AREA")
+```
+
+```{r rLookup}
+#| eval: true
+
+fs_lookup <-  fs$floodscan_lookup(r_fs_baidoa) |> 
+  mutate(
+    row_idx = row_number()
+  )
+
+df_idx_ond_2020 <-  fs_lookup |> 
+  filter(year(fs_yr) ==2020,month(fs_mo)%in% c(10,11,12)) 
+
+```
+
+```{r rFilterLookup}
+#| eval: true
+r_fs_ond <- r_fs_baidoa[[df_idx_ond_2020$row_idx]]
+```
+
+### All pixel values
+
+-   Below we see all pixel values withing Baidoa admin 2 bounding box and there daily values set on a time scale
+-   we can see 2-4 distinct episodes of "flooding"
+-   I've removed December as all values remain at/near 0 after \~Nov 15/16
+-   From this plot we start to get a picture that setting a thresholds of 20% flood fraction would result in a very poor representation of flood extent, but let's see for ourselves
+
+```{r plotOND2020}
+#| eval: true
+
+df_ond2020_values <- data.frame(values(r_fs_ond)) |> 
+  pivot_longer(
+    everything()
+  ) |> 
+  mutate(
+    date = ymd(str_extract(name,"\\d{4}.\\d{2}.\\d{2}"))
+  ) 
+
+df_ond2020_values |> 
+  mutate(
+    mo = month(date, label=T, abbr=T)
+  ) |> 
+  filter(mo!="Dec") |> 
+  ggplot(
+    aes(x= date, y= value)
+  )+
+  geom_point(alpha=0.3)+
+  scale_x_date(
+    date_breaks = "1 day",
+    date_labels = "%d",expand=c(0,0)
+  )+
+  facet_wrap(~mo,scales="free_x")+
+  theme(
+    axis.text.x=element_text(angle = 90)
+  )
+```
+
+### Raw fraction mapped
+
+```{r mapONDfractions}
+#| eval: true
+#| fig.height: 16
+
+
+df_idx_ond_2020_filt <- df_idx_ond_2020 |> 
+  filter(
+    fs_name >= "2020-10-01",
+    fs_name<= "2020-11-17"
+  )
+r_fs_ond_filt <- r_fs_baidoa[[df_idx_ond_2020_filt$row_idx]]
+
+r_fs_msk <- ifel(r_fs_ond_filt<0.01,NA,1) 
+r_fs_ond_masked <- mask(r_fs_ond_filt,r_fs_msk)
+
+map_ff_ond_2020 <- ggplot()+
+  geom_sf(data= gdf_baidoa_adm2, fill= "white")+
+  geom_spatraster(data= r_fs_ond_masked)+
+  scale_fill_viridis_c(direction = -1,na.value = NA)+
+  facet_wrap(~lyr)+
+  labs(
+    title= "Somalia Baidoa (adm2) OND 2020",
+    subtitle = "FloodScan SFED (< 1 % flood fraction)"
+  )+
+  theme(
+    axis.text = element_blank()
+  )
+
+map_ff_ond_2020
+```
+
+### Binary (thresholded) extent
+
+```{r mapONDFractionThresh}
+#| eval: true
+#| fig.height: 16
+
+mask_lte_20 <-  ifel(r_fs_ond_filt<0.2,NA,1)
+mask_lte_20 <- deepcopy(r_fs_ond_filt) 
+mask_lte_20[mask_lte_20>=0.2] <- 1
+mask_lte_20[mask_lte_20<0.2] <- NA
+
+
+
+r_fs_ond_mask_gte_20 <- mask(x=r_fs_ond_filt,
+                             mask=mask_lte_20,
+                             maskvalue = NaN,
+                             inverse=F,
+                             updatevalue = 1
+                             )
+
+
+map_ff_gte_20_ond_2020 <- ggplot()+
+  geom_sf(data= gdf_baidoa_adm2, fill= "white")+
+  geom_spatraster(data= mask_lte_20)+
+  scale_fill_viridis_c(direction = -1,
+                       na.value = "transparent")+
+  facet_wrap(~lyr)+
+  labs(
+    title= "Somalia Baidoa (adm2) OND 2020",
+    subtitle = "FloodScan SFED (Thresholded ≥ 20 % flood fraction)"
+  )+
+  theme(
+    axis.text = element_blank()
+  )
+
+
+map_ff_gte_20_ond_2020
+```
+
+```{r}
+#| eval: true
+
+# plot(r_fs_ond_filt)
+r_fs_ond_filt2x <- terra::aggregate(x=r_fs_ond_filt, 
+                                    fun = "mean", 
+                                    fact = 2,
+                                    na.rm=T
+                                    )
+
+agg_copy <- deepcopy(r_fs_ond_filt2x)
+agg_copy[agg_copy<0.02] <- NA
+
+
+r_fs_ond_filt2x_mask1 <-  ifel(r_fs_ond_filt2x<0.02,NA,1)
+
+```
+
+```{r classifyRaster}
+#| eval: true
+
+# reclassify raster with classification matrix
+# all values >= 0 and <= 0.25 become 1, etc.
+m <- c(
+  0.01, 0.2, 1,
+       0.2, 0.4, 2,
+       0.4, 0.6,3,
+       0.6, 0.8, 4,
+       0.8, 1, 5)
+m <- c(
+  0, 0.01, 1,
+       0.01, 0.05, 2,
+       0.05, 0.2,3,
+       0.2, 1, 4
+)
+rclmat <- matrix(m, ncol=3, byrow=TRUE)
+rcl <- classify(r_fs_ond_filt, rclmat, include.lowest=TRUE)
+rcl_msk <- ifel(rcl<0.01,NA,rcl) 
+rcl_msk<- as.factor(rcl_msk)
+
+df_color <-   tibble(
+  hex =  RColorBrewer::brewer.pal(n = 5,name = "Blues"),
+  value = 1:5,
+  value_label = c(
+    "0.01 - 0.2",
+    "0.2 - 0.4",
+    "0.4 - 0.6",
+    "0.6 - 0.8",
+    "0.8 - 1"
+  )
+) 
+```
+
+### 4 Options - "Raw", Binary, Aggregated, Reclassified
+
+Here we present the 4 main options that could be considered:
+
+1.  **"Raw"** - not truly raw, we remove very low values and then present the raw pixel values. Here that lower threshold is set at 1 % flood fraction
+2.  **Binary** - We threshold raw data at 20% flood fraction, everything above is considered "flooded", below is not flooded. Here, the 20 % is chosen arbitrarily, but setting the optimal threshold would likely be difficult and localized. It might make sense to set it quite low which would over-estimate flood extent
+3.  **Aggregated** - here we've aggregated pixels by a factor of 2.
+4.  **Reclassified** - bin pixel values into classes (classification table below)
+
+```{r}
+#| eval: true
+
+df_color |>
+  select(value_label) |> 
+  separate(value_label,
+           into= c("from","to"),
+           sep = "-") |> 
+mutate(
+  across(everything(),~parse_number(.x))
+) |> 
+  gt::gt() |> 
+  gt::fmt_percent(columns= everything(),decimals = 0) |> 
+  gt::cols_merge(columns=c("from","to"),pattern= "{1}-{2}") |> 
+  gt::cols_label(
+    from = "classifications"
+  )
+```
+
+```{r}
+#| eval: true
+
+interesting_dates <- c("2020-10-10",
+                       "2020-10-11",
+                       "2020-10-12",
+                       "2020-11-06",
+                       "2020-11-07",
+                       "2020-11-08",
+                       "2020-11-09")
+
+
+maps_interesting <- interesting_dates |> 
+  map(\(date_tmp){
+    # cat(date_tmp,"\n")
+    
+    map_thresh_tmp <- ggplot()+
+      geom_sf(data= gdf_baidoa_adm2, fill= "white")+
+      geom_spatraster(data= mask_lte_20[[date_tmp]])+
+      scale_fill_viridis_c(direction = -1,na.value = "transparent")+
+      labs(
+        title= date_tmp,
+        subtitle = "FloodScan Thresholded"
+      )+
+      theme(
+        axis.text = element_blank()
+      )
+    map_raw_tmp <- ggplot()+
+      geom_sf(data= gdf_baidoa_adm2, fill= "white")+
+      geom_spatraster(data= r_fs_ond_masked[[date_tmp]])+
+      scale_fill_gradientn(
+        breaks= seq(0,0.4, by =0.05),
+        colors = RColorBrewer::brewer.pal(9,"YlGnBu"),
+        na.value = "transparent",
+        limits= c(0,0.4)
+      )+
+      labs(
+        title= date_tmp,
+        subtitle = "FloodScan Raw"
+      )+
+      theme(
+        axis.text = element_blank(),
+        legend.text = element_text(angle=90)
+      )
+    
+    map_reclassified <- ggplot()+
+      geom_sf(data= gdf_baidoa_adm2, fill= "white")+
+      geom_spatraster(data= rcl_msk[[date_tmp]])+
+      scale_fill_manual(values = set_names(df_color$hex, df_color$value),
+                        labels= df_color$value_label,na.value="transparent")+
+      labs(
+        title= date_tmp,
+        subtitle = "FloodScan Reclassified"
+      )+
+      theme(
+        axis.text = element_blank(),
+        legend.title = element_blank()
+      )
+    # map_agg2_tmp <- ggplot()+
+    #   geom_sf(data= gdf_baidoa_adm2, fill= "white")+
+    #   geom_spatraster(data= r_fs_ond_filt2x_mask1[[date_tmp]])+
+    #   scale_fill_gradientn(
+    #     breaks= seq(0,0.4, by =0.05),
+    #     colors = RColorBrewer::brewer.pal(9,"YlGnBu"),
+    #     na.value = "transparent",
+    #     limits= c(0,0.4)
+    #   )+
+    #   labs(
+    #     title= date_tmp,
+    #     subtitle = "FloodScan Aggregated (Factor: 2)"
+    #   )+
+    #   theme(
+    #     axis.text = element_blank(),legend.text = element_text(angle=90)
+    #   )
+    
+    map_agg2_tmpb <- ggplot()+
+      geom_sf(data= gdf_baidoa_adm2, fill= "white")+
+      geom_spatraster(data= agg_copy[[date_tmp]])+
+      scale_fill_gradientn(
+        breaks= seq(0,0.4, by =0.05),
+        colors = RColorBrewer::brewer.pal(9,"YlGnBu"),
+        na.value = "transparent",
+        limits= c(0,0.4)
+      )+
+      labs(
+        title= date_tmp,
+        subtitle = "FloodScan Aggregated (Factor: 2)"
+      )+
+      theme(
+        axis.text = element_blank(),legend.text = element_text(angle=90)
+      )
+    map_raw_tmp+
+      map_thresh_tmp+
+      # map_agg2_tmp+
+      map_agg2_tmpb+
+      map_reclassified+
+      plot_layout(ncol=2, nrow=2)
+  })
+
+```
+
+```{r}
+#| eval: true
+
+maps_interesting |> 
+  walk(
+    \(ptmp){
+    # Sys.sleep(1)
+    print(ptmp)
+    }
+  )
+maps_interesting[[1]]
+```
+
+```{r idaiInit}
+#| eval: true
+#| include: true
+
+fs_lookup_moz <-  fs$floodscan_lookup(r_fs_moz) |> 
+  mutate(
+    row_idx = row_number()
+  )
+df_idx_idai <- fs_lookup_moz |> 
+  filter(
+    fs_name>= "2020-02-01",
+    fs_name<"2020-06-01"
+    )
+
+r_fs_idai <- r_fs_moz[[df_idx_idai$row_idx]]
+
+
+df_idai_values <- data.frame(values(r_fs_idai)) |> 
+  pivot_longer(
+    everything()
+  ) |> 
+  mutate(
+    date = ymd(str_extract(name,"\\d{4}.\\d{2}.\\d{2}"))
+  ) 
+```
+
+```{r idaiScatter}
+#| eval: false
+# hard to interpret
+df_idai_values |> 
+  mutate(
+    mo = month(date, label=T, abbr=T)
+  ) |> 
+  # filter(mo!="Dec") |> 
+  ggplot(
+    aes(x= date, y= value)
+  )+
+  geom_point(alpha=0.3)+
+  scale_x_date(
+    date_breaks = "1 day",
+    date_labels = "%d",expand=c(0,0)
+  )+
+  facet_wrap(~mo,scales="free_x")+
+  theme(
+    axis.text.x=element_text(angle = 90)
+  )
+
+
+```
+
+## Case Study 2: Idai
+
+-   can run a similar analysis for hurricane Idai or any other large flood event in the African continent. Just need an area to zoom in on. Country level is tricky to analyze because of geographic differences & scale
+
+### Raw Fraction Mapped
+
+-   Here we look at Sofala province in Mozambique from February-May 2020.
+-   You can see Large scale flooding really picks up **Feb 15** and begins to subside somewhere around **20 March.**
+-   **scale dependence** This is a much bigger area than Baidoa and it's clear that interpretations like the one above are scale dependent, would come up with different dates if I were more OR less zoomed in.
+
+```{r PrepidaiMapsDaily}
+#| eval: true
+#| fig.height: 16
+#| include: false
+
+
+# let me split these by month so smaller plots
+r_fs_idai_msk <- ifel(r_fs_moz<0.01,NA,1) 
+r_fs_idai_masked <- mask(r_fs_moz,r_fs_idai_msk)
+
+# ck <- df_idx_idai %>%
+#   split(.$fs_mo) 
+lp_idai_sofala <- df_idx_idai %>%
+  split(.$fs_mo) |> 
+  map(
+    \(dftmp){
+      r_ida_subset <- r_fs_idai_masked[[dftmp$row_idx]]
+      mo_label <- month(unique(dftmp$fs_mo),abbr=T,label=T)
+      ggplot()+
+        geom_sf(data= gdf_moz_sofala, fill= "white")+
+        geom_spatraster(data= r_ida_subset)+
+        scale_fill_viridis_c(direction = -1,na.value = NA)+
+        facet_wrap(~lyr)+
+        labs(
+          title= glue("Sofala Province Mozambique - {mo_label} 2020"),
+          subtitle = "FloodScan SFED (< 1 % flood fraction)"
+        )+
+        theme(
+          axis.text = element_blank()
+        )
+      
+    }
+  )
+```
+
+```{r}
+#| eval: true
+#| fig.height: 16
+
+lp_idai_sofala$`2020-02`
+lp_idai_sofala$`2020-03`
+lp_idai_sofala$`2020-04`
+lp_idai_sofala$`2020-05`
+```
+
+### Binary (thresholded) extent
+
+-   Here we see the binary of 20% applied to same maps
+-   It's pretty clear from preliminary look that this threshold might be fairly useful in terms of detecting flood signals at this scale. You can see still see the increase in flooding around Feb 15, perhaps even more clearly than in the raw values. However, it also gives the illusion that the floods subside much more rapidly.
+-   Assuming the raw value provide more nuance - it's clear that a 20% threshold would provide a poor approximation of flood delineation/extent.
+-   Again going to bold **scale dependence** as a challenge in interpreting these results.
+
+```{r PrepBinarySofalaMaps}
+#| eval: true
+#| fig.height: 16
+
+mask_lte_20 <-  ifel(r_fs_moz<0.2,NA,1)
+
+
+lp_idai_sofala_binary <- df_idx_idai %>%
+  split(.$fs_mo) |> 
+  map(
+    \(dftmp){
+      r_ida_subset <- mask_lte_20[[dftmp$row_idx]]
+      mo_label <- month(unique(dftmp$fs_mo),abbr=T,label=T)
+      ggplot()+
+        geom_sf(data= gdf_moz_sofala, fill= "white")+
+        geom_spatraster(data= r_ida_subset)+
+        scale_fill_viridis_c(direction = -1,
+                             na.value = "transparent")+
+        facet_wrap(~lyr)+
+        labs(
+          title= glue("Sofala Province Mozambique - {mo_label} 2020"),
+          subtitle =  "FloodScan SFED (Thresholded ≥ 20 % flood fraction)"
+        )+
+        theme(
+          axis.text = element_blank()
+        )
+      
+    }
+  )
+```
+
+```{r binarySofalaMaps}
+#| eval: true
+#| fig.height: 16
+
+lp_idai_sofala_binary$`2020-02`
+lp_idai_sofala_binary$`2020-03`
+lp_idai_sofala_binary$`2020-04`
+lp_idai_sofala_binary$`2020-05`
+```
+
+### Raw + Binary (a subset)
+
+TBD/coming soon - will pick out some interesting dates to compare
+
+```{r idaiMaps}
+map_ff_idai<- ggplot()+
+  geom_sf(data= gdf_moz_adm0, fill= "white")+
+  geom_spatraster(data= r_fs_idai_masked)+
+  scale_fill_viridis_c(direction = -1,na.value = NA)+
+  facet_wrap(~lyr)+
+  labs(
+    title= "Moz Idai March-June 2020",
+    subtitle = "FloodScan SFED (< 1 % flood fraction)"
+  )+
+  theme(
+    axis.text = element_blank()
+  )
+
+map_ff_idai
+```
+
+## Appendix/Scrps
+
+```{r}
+#| include: false
+
+# can we basically look at each pixel at each threshold and figure out how many pixels withing window -- lets say 4 pixel radius are: a.) above threshold, b.) increasing in value from previous n days?
+
+r_fs_clip_gdf <- mask(r_fs,gdf) 
+
+# this may speed things up to do first
+r_fs_clip_gdf_samp <- r_fs_clip_gdf
+msk <-  ifel(r_fs_clip_gdf_samp<0.02,NA,1)
+r_fs_samp_msk <- mask(r_fs_clip_gdf_samp,msk ) # pretty slow 1-2 minutes so far and counting 1:46
+
+
+# so now we've removed all the very low noise!
+r_denoised_samp <- r_fs_samp_msk[[c(1)]]
+
+
+
+thresh_seq <- seq(0.05,.5, by =0.05)
+thresh_seq <- set_names(thresh_seq,as.character(thresh_seq))
+lr_thresh <- thresh_seq |> 
+  map(\(thresh_tmp){
+    rcopy_tmp <- deepcopy(r_denoised_samp)
+    cat(thresh_tmp,"\n")
+    rcopy_tmp[rcopy_tmp>= thresh_tmp] <- 1
+    rcopy_tmp[rcopy_tmp!=1] <- NA
+    return(rcopy_tmp)
+  }
+  )
+
+```
+
+```{r}
+#| include: false
+num_imgs <- ond_2020_idx |> length()
+# Define the step size
+step <- 10
+
+# Initialize an empty list to store the sequences
+sequences <- list()
+
+# Initialize the starting point
+start <- 1
+
+# Iterate while the end point of the sequence is less than or equal to 92
+while (start + step - 1 <= num_imgs) {
+  end <- start + step - 1  # Calculate the end point
+  sequences[[length(sequences) + 1]] <- seq(start, end)  # Create sequence and store it in the list
+  start <- end + 1  # Update the starting point for the next iteration
+}
+
+map(
+  sequences,
+  \(seq_tmp){
+    r_fs_seq <- r_fs_ond[[seq_tmp]]
+    r_fs_seq |> 
+      plot()
+    Sys.sleep(5)
+  }
+)
+```
+
+```{r}
+#| include: false
+# ifel(r_fs<0.02,NA,r_fs)
+
+
+thresh_seq <- seq(0.05,.5, by =0.05)
+thresh_seq <- set_names(thresh_seq,as.character(thresh_seq))
+lr_thresh <- thresh_seq |> 
+  map(\(thresh_tmp){
+    rcopy_tmp <- deepcopy(r_fs)
+    cat(thresh_tmp,"\n")
+    rcopy_tmp[rcopy_tmp>= thresh_tmp] <- 1
+    rcopy_tmp[rcopy_tmp!=1] <- NA
+    return(rcopy_tmp)
+  }
+  )
+```

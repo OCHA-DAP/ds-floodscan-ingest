@@ -25,11 +25,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
               libcurl4-openssl-dev\
+<<<<<<< migrate-to-blob
+              libxml2-dev\
+              libgdal-dev \
+              libproj-dev \
+              libgeos-dev \
+              libudunits2-dev
+=======
               libxml2-dev
       #       libgdal-dev \
       #       libproj-dev \
       #       libgeos-dev \
       #       libudunits2-dev
+>>>>>>> main
 
       - name: Create authorization JSON
         id: create-json
@@ -43,13 +51,28 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ env.R_LIBS_USER }}
+<<<<<<< migrate-to-blob
+          key: R-dependency-cache-${{ hashFiles('.github/depends2.R') }}
+=======
           key: R-dependency-cache-${{ hashFiles('.github/depends.R') }}
+>>>>>>> main
 
       - name: Install R dependencies
         if: steps.cache-r-deps.outputs.cache-hit != 'true'
         run: |
           Rscript .github/depends2.R
 
+<<<<<<< migrate-to-blob
+      - name: Run floodscan-cogs
+        run: |
+          source(file.path("src", "upload_latest_cog.R"))
+        shell: Rscript {0}
+        env:
+          DSCI_AZ_SAS_DEV: ${{ secrets.DSCI_AZ_SAS_DEV }}
+          DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
+          FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
+          FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+=======
 
       # - name: Run floodscan-cogs
       #   run: |
@@ -60,5 +83,6 @@ jobs:
       #     FS_SA_JSON: "sa_auth.json"
       #     FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
       #     FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+>>>>>>> main
 
 
