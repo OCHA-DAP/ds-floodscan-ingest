@@ -47,7 +47,6 @@ jobs:
         if: steps.cache-r-deps.outputs.cache-hit != 'true'
         run: |
           Rscript .github/depends.R
-
       - name: R script - Run floodscan-cogs
         run: |
           source(file.path("src", "upload_latest_cog.R"))
