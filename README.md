@@ -6,8 +6,8 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-The primary purpose of this repo is to host a pipeline to copy AER Flood
-Scan data to our Azure Blob Storage.
+The primary purpose of this repo is to host a pipeline to copy AER
+FloodScan data to our Azure Blob Storage.
 
 Raw data provided in 2 formats (for both SFED & MFED):
 
@@ -25,14 +25,14 @@ The automated pipeline was set up in 2 phases using GitHub Actions
   - `.github/workflows/floodscan-ingest.yaml` which triggers
     `src/DL_zips.R`
   - this process could be archived as it was replaced by phase 2 below
-- **Phase 2**: was developed once our blob storage account and sends the
-  data to our “dev” blob storage “global” container with the prefix of
-  `raster/cogs/aer_area_300s_{yyyymmdd}_v05r01.tif`. Where each tif
-  represents 1 day of FloodScan data with both SFED & MFED bands.
+- **Phase 2**: was developed once our blob storage account was created.
+  It sends the data to our “dev” blob storage “global” container with
+  the prefix of `raster/cogs/aer_area_300s_{yyyymmdd}_v05r01.tif`. Each
+  COG represents 1 day of FloodScan data with both SFED & MFED bands.
   - `.github/workflows/floodcan-cog-blob.yml` which triggers
     `src/upload_latest_cog.R`
   - This process downloads the SFED & MFED 90 day zip -\> extracts the
-    latest tifs from each -\> merges them into 1 spatRaster -\> and the
+    latest tifs from each -\> merges them into 1 spatRaster -\> and then
     writes to the blob as a Cloud Optimized Geotif (COG).
 
 ## Upload of historical (one-time)
