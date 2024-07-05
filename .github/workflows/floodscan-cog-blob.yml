@@ -63,3 +63,4 @@ jobs:
         env:
           DS_PIPELINES_TEST_SLACK: ${{ secrets.DS_PIPELINES_TEST_SLACK }}
           DS_PIPELINES_SLACK: ${{ secrets.DS_PIPELINES_SLACK }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
