@@ -12,6 +12,8 @@ on:
           options:
             - "TRUE"
             - "FALSE"
+    schedule:
+      - cron: '0 23 * * *' # Run every day at 11 pm
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -64,3 +66,4 @@ jobs:
           DS_PIPELINES_TEST_SLACK: ${{ secrets.DS_PIPELINES_TEST_SLACK }}
           DS_PIPELINES_SLACK: ${{ secrets.DS_PIPELINES_SLACK }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}

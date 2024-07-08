@@ -13,7 +13,12 @@ slack_post_message <- function(
     dry_run = TRUE
 
 ) {
-  slack_url <-  ifelse(dry_run,Sys.getenv("DS_PIPELINES_TEST_SLACK"),"No Webhook yet")
+  slack_url <-  ifelse(
+    dry_run,
+    Sys.getenv("DS_PIPELINES_TEST_SLACK"),
+    # temporarily make irrelevant and just use TEST webhook no matter what
+    Sys.getenv("DS_PIPELINES_TEST_SLACK")
+    )
   # See https://app.slack.com/block-kit-builder for prototyping layouts in JSON
   msg <- list(
     blocks = list(
