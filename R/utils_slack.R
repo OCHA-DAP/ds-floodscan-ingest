@@ -54,21 +54,6 @@ slack_post_message <- function(
 }
 
 
-#' Builds the header text, depending on how many signals are reported
-#'
-#'
-#' @returns String header text
-#' @export
-slack_build_header <- function() {
-    paste0(
-      ":rotating_light: <!channel> ",
-      format(Sys.Date(),"%e %B %Y"),
-      " FloodScan Pipeline"
-    )
-  }
-
-
-
 #' Takes the response from a GitHub Actions run of a single indicator
 #' and outputs a status message to be posted to Slack
 #'
