@@ -4,6 +4,7 @@ library(dplyr)
 library(terra)
 library(stringr)
 
+dry_run <- as.logical(Sys.getenv("DRY_RUN", unset = TRUE))
 
 run_date <- Sys.Date()
 run_date_chr <- format(run_date,"%Y%m%d")
@@ -23,7 +24,7 @@ lr <- c("SFED","MFED") |>
 
       tif_meta <- tibble(
         unzip(TMP_PATH,list=T)
-        )|>
+      )|>
         select(Name) |>
         mutate(
           yyyymmdd = stringr::str_extract(Name,
@@ -52,13 +53,14 @@ lr <- c("SFED","MFED") |>
 r <- rast(lr)
 src_name <- str_remove(basename(terra::sources(r)[1]),"sfed_|mfed_")
 
-cumulus::write_az_file(
-        service = "blob",
-        stage = "dev",
-        x = r,
-        name = paste0("raster/cogs/",src_name),
-        container = "global",
-        endpoint_template =  Sys.getenv("DSCI_AZ_ENDPOINT"),
-        sas_key = Sys.getenv("DSCI_AZ_SAS_DEV")
-      )
-
+if(!dry_run){
+  cumulus::write_az_file(
+    service = "blob",
+    stage = "dev",
+    x = r,
+    name = paste0("raster/cogs/",src_name),
+    container = "global",
+    endpoint_template =  Sys.getenv("DSCI_AZ_ENDPOINT"),
+    sas_key = Sys.getenv("DSCI_AZ_SAS_DEV")
+  )
+}

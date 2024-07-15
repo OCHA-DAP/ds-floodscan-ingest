@@ -3,9 +3,17 @@
 name: floodscan-cogs
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 23 * * *' # Run every day at 11 pm
+    workflow_dispatch:
+      inputs:
+        DRY_RUN:
+          required: true
+          type: choice
+          default: "TRUE"
+          options:
+            - "TRUE"
+            - "FALSE"
+    schedule:
+      - cron: '0 23 * * *' # Run every day at 11 pm
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -30,26 +38,18 @@ jobs:
               libgeos-dev \
               libudunits2-dev
 
-
-      - name: Create authorization JSON
-        id: create-json
-        uses: jsdaniell/create-json@v1.2.2
-        with:
-          name: "sa_auth.json"
-          json: ${{ secrets.GCP_CREDENTIALS }}
-
       - name: Cache R dependencies
         id: cache-r-deps
         uses: actions/cache@v2
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: R-dependency-cache-${{ hashFiles('.github/depends2.R') }}
+          key: R-dependency-cache-${{ hashFiles('.github/depends.R') }}
 
       - name: Install R dependencies
         if: steps.cache-r-deps.outputs.cache-hit != 'true'
         run: |
-          Rscript .github/depends2.R
-      - name: Run floodscan-cogs
+          Rscript .github/depends.R
+      - name: R script - Run floodscan-cogs
         run: |
           source(file.path("src", "upload_latest_cog.R"))
         shell: Rscript {0}
@@ -59,5 +59,11 @@ jobs:
           FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
           FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
 
-
-
+      - name: R script - slack notification
+        run: Rscript ./src/send_slack_notification.R
+        shell: bash
+        env:
+          DS_PIPELINES_TEST_SLACK: ${{ secrets.DS_PIPELINES_TEST_SLACK }}
+          DS_PIPELINES_SLACK: ${{ secrets.DS_PIPELINES_SLACK }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}

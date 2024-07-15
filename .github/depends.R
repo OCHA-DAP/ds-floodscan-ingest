@@ -1,24 +1,20 @@
-#
-# install.versions(
-#   c("purrr",
-#     "googledrive",
-#     "readr"),
-#   c(
-#     "1.0.2",
-#     "2.1.1",
-#     "2.1.5"
-#   )
-# )
-#
 
 install.packages(
   c(
+    "box",
     "dplyr",
     "purrr",
     "googledrive",
     "readr",
-    "stringr"
+    "stringr",
+    "remotes",
+    "terra",
+    "logger",
+    "httr2",
+    "jsonlite"
     )
 )
 
 
+
+remotes::install_github(repo = "OCHA-DAP/cumulus",ref = "read_az_file_v1")
