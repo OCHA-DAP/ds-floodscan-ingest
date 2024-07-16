@@ -61,7 +61,7 @@ slack_post_message <- function(
 #'
 #' @returns String status message to be posted to Slack
 #' @export
-slack_build_workflow_status <- function(run_id) {
+slack_build_workflow_status <- function(run_id,include_dispatch = FALSE) {
   df_runs <- tryCatch({
     df_runs <- query_github(run_id = run_id )
   },
@@ -81,9 +81,17 @@ slack_build_workflow_status <- function(run_id) {
   }
   # Get today's scheduled runs from the main branch
   df_runs$date <- as.Date(df_runs$workflow_runs.created_at)
+
+  events_include <- "schedule"
+
+  if(include_dispatch){
+    events_include <- c("schedule","workflow_dispatch")
+  }
+
+
   df_sel <- dplyr$filter(
     df_runs,
-    workflow_runs.event == "schedule",
+    workflow_runs.event %in% events_include,
     workflow_runs.head_branch == "main",
     date == Sys.Date()
   )
