@@ -4,16 +4,8 @@ name: floodscan-cogs
 
 on:
     workflow_dispatch:
-      inputs:
-        DRY_RUN:
-          required: true
-          type: choice
-          default: "TRUE"
-          options:
-            - "TRUE"
-            - "FALSE"
     schedule:
-      - cron: '0 23 * * *' # Run every day at 11 pm
+      - cron: '30 23 * * *' # Run every day at 11 pm
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -58,12 +50,3 @@ jobs:
           DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
           FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
           FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
-
-      - name: R script - slack notification
-        run: Rscript ./src/send_slack_notification.R
-        shell: bash
-        env:
-          DS_PIPELINES_TEST_SLACK: ${{ secrets.DS_PIPELINES_TEST_SLACK }}
-          DS_PIPELINES_SLACK: ${{ secrets.DS_PIPELINES_SLACK }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}
