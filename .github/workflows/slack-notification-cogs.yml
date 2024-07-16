@@ -1,0 +1,55 @@
+# This workflow uses actions to automatically download 90d rotating Africa FloodScan zip files.
+# It then unzips the file grabs the SFED , MFED and merges them into cOG
+name: slack-notification
+
+on:
+    workflow_dispatch:
+      inputs:
+        DRY_RUN:
+          required: true
+          type: choice
+          default: "TRUE"
+          options:
+            - "TRUE"
+            - "FALSE"
+    schedule:
+      - cron: '0 23 * * *' # Run every day at 11 pm
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.x'
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+              libcurl4-openssl-dev\
+
+      - name: Cache R dependencies
+        id: cache-r-deps
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: R-dependency-cache-${{ hashFiles('.github/depends.R') }}
+
+      - name: Install R dependencies
+        if: steps.cache-r-deps.outputs.cache-hit != 'true'
+        run: |
+          Rscript .github/depends.R
+
+      - name: R script - slack notification
+        run: Rscript ./src/send_slack_notification.R
+        shell: bash
+        env:
+          DS_PIPELINES_TEST_SLACK: ${{ secrets.DS_PIPELINES_TEST_SLACK }}
+          DS_PIPELINES_SLACK: ${{ secrets.DS_PIPELINES_SLACK }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}
