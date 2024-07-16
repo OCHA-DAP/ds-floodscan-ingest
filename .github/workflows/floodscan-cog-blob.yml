@@ -29,18 +29,18 @@ jobs:
               libproj-dev \
               libgeos-dev \
               libudunits2-dev
-
       - name: Cache R dependencies
         id: cache-r-deps
         uses: actions/cache@v2
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: R-dependency-cache-${{ hashFiles('.github/depends.R') }}
+          key: R-dependency-cache-${{ hashFiles('.github/depends2.R') }}
 
       - name: Install R dependencies
         if: steps.cache-r-deps.outputs.cache-hit != 'true'
         run: |
-          Rscript .github/depends.R
+          Rscript .github/depends2.R
+
       - name: R script - Run floodscan-cogs
         run: |
           source(file.path("src", "upload_latest_cog.R"))
