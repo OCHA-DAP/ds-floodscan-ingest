@@ -5,7 +5,7 @@ name: floodscan-cogs
 on:
     workflow_dispatch:
     schedule:
-      - cron: '0 23 * * *' # Run every day at 11 pm
+      - cron: '30 23 * * *' # Run every day at 11 pm
 jobs:
   monitor:
     runs-on: ubuntu-latest
