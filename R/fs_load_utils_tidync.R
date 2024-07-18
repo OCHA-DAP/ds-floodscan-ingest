@@ -5,8 +5,7 @@ box::use(sf)
 box::use(lubridate[as_date,floor_date,year])
 
 
-
-#' Title
+#' fs_to_raster
 #'
 #' @param fs_obj
 #' @param band
