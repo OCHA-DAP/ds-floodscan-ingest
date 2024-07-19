@@ -10,7 +10,7 @@ dry_run <- as.logical(Sys.getenv("DRY_RUN", unset = TRUE))
 run_id <- "floodscan-cog-blob"
 logger$log_info(paste0("Checking GitHub Actions status for ", run_id, "..."))
 
-status <- slack$slack_build_workflow_status(run_id = run_id, include_dispatch = FALSE)
+status <- slack$slack_build_workflow_status(run_id = run_id, include_dispatch = FALSE,branch = "main")
 
 run_failed <- stringr$str_detect(status,"Failure")
 

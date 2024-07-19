@@ -57,11 +57,16 @@ slack_post_message <- function(
 #' Takes the response from a GitHub Actions run of a single indicator
 #' and outputs a status message to be posted to Slack
 #'
-#' @param run_id ID of the indicator
-#'
+#' @param run_id  `character` ID of the indicator
+#' @param include_dispatch `description`logical if FALSE (default) only builds
+#'     off scheduled runs. If TRUE, workflow will also be built off dispatched
+#'     runs
+#' @param branch `character` which branch to build workflow status from.
+#'     defaults to just main, but allows user to specify other. Handy for
+#'     testing.
 #' @returns String status message to be posted to Slack
 #' @export
-slack_build_workflow_status <- function(run_id,include_dispatch = FALSE) {
+slack_build_workflow_status <- function(run_id,include_dispatch = FALSE, branch = "main") {
   df_runs <- tryCatch({
     df_runs <- query_github(run_id = run_id )
   },
@@ -89,10 +94,11 @@ slack_build_workflow_status <- function(run_id,include_dispatch = FALSE) {
   }
 
 
+
   df_sel <- dplyr$filter(
     df_runs,
     workflow_runs.event %in% events_include,
-    workflow_runs.head_branch == "main",
+    workflow_runs.head_branch %in% branch,
     date == Sys.Date()
   )
 
@@ -137,3 +143,4 @@ query_github <- function(run_id){
     jsonlite$fromJSON(flatten = TRUE) |>
     as.data.frame()
 }
+

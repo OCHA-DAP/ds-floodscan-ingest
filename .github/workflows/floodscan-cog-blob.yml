@@ -3,16 +3,31 @@
 name: floodscan-cogs
 
 on:
-    workflow_dispatch:
-    schedule:
-      - cron: '00 23 * * *' # Run every day at 11 pm
+  workflow_dispatch:
+      inputs:
+        DRY_RUN:
+          required: true
+          type: choice
+          default: "TRUE"
+          options:
+            - "TRUE"
+            - "FALSE"
+      schedule:
+        - cron: '00 23 * * *' # Run every day at 11 pm
 jobs:
   monitor:
     runs-on: ubuntu-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      DSCI_AZ_SAS_DEV: ${{ secrets.DSCI_AZ_SAS_DEV }}
+      DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
+      FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
+      FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+      DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
         with:
@@ -29,24 +44,19 @@ jobs:
               libproj-dev \
               libgeos-dev \
               libudunits2-dev
+
       - name: Cache R dependencies
         id: cache-r-deps
         uses: actions/cache@v2
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: R-dependency-cache-${{ hashFiles('.github/depends2.R') }}
+          key: R-dependency-cache-${{ hashFiles('.github/depends.R') }}
 
       - name: Install R dependencies
         if: steps.cache-r-deps.outputs.cache-hit != 'true'
         run: |
-          Rscript .github/depends2.R
+          Rscript .github/depends.R
 
       - name: R script - Run floodscan-cogs
-        run: |
-          source(file.path("src", "upload_latest_cog.R"))
-        shell: Rscript {0}
-        env:
-          DSCI_AZ_SAS_DEV: ${{ secrets.DSCI_AZ_SAS_DEV }}
-          DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
-          FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
-          FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+        shell: bash
+        run: Rscript ./src/upload_latest_cog.R
