@@ -5,6 +5,7 @@ install.packages(
     "box",
     "dplyr",
     "purrr",
+    "tidyr",
     "googledrive",
     "readr",
     "stringr",

@@ -7,6 +7,7 @@ box::use(dplyr)
 box::use(logger)
 box::use(glue)
 box::use(forcats)
+box::use(tidyr)
 
 
 #' blob_date_gaps
@@ -36,7 +37,7 @@ blob_date_gaps <- function(run_date = Sys.Date(),test=FALSE){
     container = cog_container,
     prefix = "raster/cogs/aer_area_300s"
   )
-  box::use(tidyr)
+
   df_blob_names <- blob_names |>
     dplyr$mutate(
       date = extract_date(name)
