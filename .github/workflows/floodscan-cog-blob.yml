@@ -49,12 +49,12 @@ jobs:
         run: |
           Rscript .github/depends.R
 
-      # - name: R script - Run floodscan-cogs
-      #   shell: bash
-      #   run: Rscript ./src/upload_latest_cog.R
-      #   env:
-      #     DSCI_AZ_SAS_DEV: ${{ secrets.DSCI_AZ_SAS_DEV }}
-      #     DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
-      #     FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
-      #     FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
-      #     DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}
+      - name: R script - Run floodscan-cogs
+        shell: bash
+        run: Rscript ./src/upload_latest_cog.R
+        env:
+          DSCI_AZ_SAS_DEV: ${{ secrets.DSCI_AZ_SAS_DEV }}
+          DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
+          FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
+          FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
+          DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}
