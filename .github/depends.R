@@ -15,7 +15,7 @@ install.packages(
     "AzureStor",
     "rlang",
     "glue",
-    "forecats",
+    "forcats",
     "httr2",
     "jsonlite"
     )
