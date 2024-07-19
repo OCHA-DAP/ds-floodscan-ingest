@@ -126,7 +126,7 @@ if(!dry_run){
                                  "SPARSE_OK=YES",
                                  "OVERVIEW_RESAMPLING=AVERAGE")
       )
-      cog_container <-  load_containers(containers = "global")$GLOBAL_CONT
+      cog_container <-  blob$load_containers(containers = "global")$GLOBAL_CONT
 
       invisible(
         utils$capture.output(
