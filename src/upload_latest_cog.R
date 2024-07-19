@@ -4,7 +4,6 @@ box::use(dplyr)
 box::use(terra)
 box::use(stringr)
 box::use(logger)
-box::use(utils)
 box::use(AzureStor)
 box::use(glue)
 
@@ -20,7 +19,7 @@ run_date_chr <- format(run_date,"%Y%m%d")
 lr <- c("SFED","MFED") |>
   purrr::map(
     \(frac_type){
-      # frac_type <- "SFED"
+      frac_type <- "SFED"
 
       TMP_NAME <-  paste0("FloodScan_",frac_type,"_90d_",run_date_chr,".zip")
       TMP_PATH <- file.path(tempdir(), TMP_NAME)
@@ -29,6 +28,7 @@ lr <- c("SFED","MFED") |>
 
       logger$log_info("Downloading {frac_type}")
       download.file(DL_URL,TMP_PATH, quiet=TRUE)
+      logger$log_info("Download {frac_type} to memory - succesful!")
 
 
       tif_meta <- dplyr$tibble(
@@ -136,7 +136,7 @@ if(!dry_run){
       cog_container <-  blob$load_containers(containers = "global")$GLOBAL_CONT
 
       invisible(
-        utils$capture.output(
+        capture.output(
           AzureStor$upload_blob(
             container = cog_container,
             src = tf,
