@@ -1,5 +1,4 @@
 
-
 install.packages(
   c(
     "box",
@@ -8,14 +7,9 @@ install.packages(
     "googledrive",
     "readr",
     "stringr",
-    "logger",
-    "utils",
     "remotes",
     "terra",
-    "AzureStor",
-    "rlang",
-    "glue",
-    "forecats",
+    "logger",
     "httr2",
     "jsonlite"
     )
@@ -23,5 +17,4 @@ install.packages(
 
 
 
-
-
+remotes::install_github(repo = "OCHA-DAP/cumulus",ref = "read_az_file_v1")
