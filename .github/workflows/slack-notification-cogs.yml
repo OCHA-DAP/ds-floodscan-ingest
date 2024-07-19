@@ -45,10 +45,9 @@ jobs:
         run: |
           Rscript .github/depends.R
 
-      - name: R script - Run floodscan-cogs
-        run: |
-          source(file.path("src", "upload_latest_cog.R"))
-        shell: Rscript {0}
+      - name: R script - slack notification
+        run: Rscript ./src/send_slack_notification.R
+        shell: bash
         env:
           DS_PIPELINES_TEST_SLACK: ${{ secrets.DS_PIPELINES_TEST_SLACK }}
           DS_PIPELINES_SLACK: ${{ secrets.DS_PIPELINES_SLACK }}
