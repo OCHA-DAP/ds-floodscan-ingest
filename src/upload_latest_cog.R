@@ -6,6 +6,7 @@ box::use(stringr)
 box::use(logger)
 box::use(utils)
 box::use(AzureStor)
+box::use(glue)
 
 box::use(./utils/blob)
 
@@ -52,7 +53,6 @@ lr <- c("SFED","MFED") |>
         files = df_tifs_needed$Name
       )
 
-      list.files(td,recursive = T)
 
       tf <- file.path(
         td,
@@ -67,7 +67,10 @@ lr <- c("SFED","MFED") |>
           r
         }
       )
+      tifs_downloaded_to_tmp <- glue$glue_collapse(basename(df_tifs_needed$Name),"\n")
+      logger$log_info("Downloaded to tmp:\n{tifs_downloaded_to_tmp}")
       lr
+
     }
   )
 
@@ -123,13 +126,14 @@ if(!dry_run){
                                  "SPARSE_OK=YES",
                                  "OVERVIEW_RESAMPLING=AVERAGE")
       )
+      cog_container <-  load_containers(containers = "global")$GLOBAL_CONT
 
       invisible(
         utils$capture.output(
           AzureStor$upload_blob(
-            container = container,
+            container = cog_container,
             src = tf,
-            dest = name
+            dest = paste0("raster/cogs/",blob_name_upload)
           )
         )
       )
