@@ -3,15 +3,7 @@
 name: floodscan-cogs
 
 on:
-  workflow_dispatch:
-      inputs:
-        DRY_RUN:
-          required: true
-          type: choice
-          default: "TRUE"
-          options:
-            - "TRUE"
-            - "FALSE"
+    workflow_dispatch:
     schedule:
       - cron: '00 23 * * *' # Run every day at 11 pm
 jobs:
@@ -47,7 +39,7 @@ jobs:
       - name: Install R dependencies
         if: steps.cache-r-deps.outputs.cache-hit != 'true'
         run: |
-          Rscript .github/depends.R
+          Rscript .github/depends2.R
 
       - name: R script - Run floodscan-cogs
         run: |
@@ -58,4 +50,3 @@ jobs:
           DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
           FLOODSCAN_SFED_URL: ${{ secrets.FLOODSCAN_SFED_URL }}
           FLOODSCAN_MFED_URL: ${{ secrets.FLOODSCAN_MFED_URL }}
-          DRY_RUN: ${{ inputs.DRY_RUN || 'FALSE' }}
