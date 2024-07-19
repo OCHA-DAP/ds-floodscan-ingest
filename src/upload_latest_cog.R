@@ -38,8 +38,8 @@ lr <- c("SFED","MFED") |>
           date_tif = blob$extract_date(Name)
         )
 
-      # dates_needed <- blob$blob_date_gaps()
-      dates_needed <- as.Date("2024-07-17")
+      dates_needed <- blob$blob_date_gaps()
+
 
       df_tifs_needed <- tif_meta |>
         dplyr$filter(
@@ -106,6 +106,7 @@ if(!dry_run){
   td <- tempdir()
 
   purrr$map(
+    lr_merged,
     \(r_tmp){
       blob_name_upload <- stringr$str_remove(
         string = basename(
