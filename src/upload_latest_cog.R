@@ -27,7 +27,7 @@ lr <- c("SFED","MFED") |>
       DL_VAR <- paste0("FLOODSCAN_",frac_type,"_URL")
       DL_URL <- Sys.getenv(DL_VAR)
 
-      cat("Downloading " , frac_type,"\n")
+      logger$log_info("Downloading {frac_type}")
       download.file(DL_URL,TMP_PATH, quiet=TRUE)
 
 
@@ -74,6 +74,8 @@ lr <- c("SFED","MFED") |>
     }
   )
 
+
+logger$log_info("Processing/merging SFED & MFED rasters")
 # will merge them all and then subset based on date.
 r <- terra$rast(purrr$flatten(lr))
 
@@ -106,6 +108,7 @@ lr_merged <- purrr$map(
 
 # loop through each raster and write COG to blob
 if(!dry_run){
+  logger$log_info("Uploading processed rasters to blob storage")
   td <- tempdir()
 
   purrr$map(
