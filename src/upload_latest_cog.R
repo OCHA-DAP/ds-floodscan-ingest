@@ -38,8 +38,11 @@ lr <- c("SFED","MFED") |>
         dplyr$mutate(
           date_tif = blob$extract_date(Name)
         )
+      logger$log_info("Created zip contents meta table")
 
       dates_needed <- blob$blob_date_gaps()
+
+      logger$log_info("Found dates missing on blob")
 
 
       df_tifs_needed <- tif_meta |>
@@ -51,11 +54,14 @@ lr <- c("SFED","MFED") |>
         logger$log_info("No {frac_type} tif updates available")
       }
 
+      if(nrow(df_tifs_needed)>0){
+
       unzip(
         TMP_PATH,
         exdir = td <- tempdir(),
         files = df_tifs_needed$Name
       )
+        logger$log_info("COGS needed unzipped")
 
 
       tf <- file.path(
@@ -73,7 +79,8 @@ lr <- c("SFED","MFED") |>
       )
       tifs_downloaded_to_tmp <- glue$glue_collapse(basename(df_tifs_needed$Name),"\n")
       logger$log_info("Downloaded to tmp:\n{tifs_downloaded_to_tmp}")
-      lr
+      return(lr)
+      }
 
     }
   )
