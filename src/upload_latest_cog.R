@@ -52,6 +52,7 @@ lr <- c("SFED","MFED") |>
 
       if(nrow(df_tifs_needed)==0){
         logger$log_info("No {frac_type} tif updates available")
+        ret <- NULL
       }
 
       if(nrow(df_tifs_needed)>0){
@@ -69,7 +70,7 @@ lr <- c("SFED","MFED") |>
         df_tifs_needed$Name
       )
 
-      lr <- purrr$map(
+      ret <- purrr$map(
         tf,
         \(tmp_tf){
           r <- terra$rast(tmp_tf)
@@ -79,8 +80,10 @@ lr <- c("SFED","MFED") |>
       )
       tifs_downloaded_to_tmp <- glue$glue_collapse(basename(df_tifs_needed$Name),"\n")
       logger$log_info("Downloaded to tmp:\n{tifs_downloaded_to_tmp}")
-      return(lr)
+      ret
       }
+
+      return(ret)
 
     }
   )
@@ -88,7 +91,12 @@ lr <- c("SFED","MFED") |>
 
 logger$log_info("Processing/merging SFED & MFED rasters")
 # will merge them all and then subset based on date.
-r <- terra$rast(purrr$flatten(lr))
+
+
+lr_non_null <- purrr$keep(lr,\(x) !is.null(x))
+
+if(length(lr_non_null)>0){
+  r <- terra$rast(purrr$flatten(lr))
 
 # loop through each unique date string that has SFED & MFED
 # and merge them
@@ -155,4 +163,8 @@ if(!dry_run){
   )
 }
 
+}
 
+if(length(lr_non_null)==0){
+  logger$log_info("no updates made")
+}
