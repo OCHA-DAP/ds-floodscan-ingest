@@ -35,8 +35,6 @@ if(!is.null(dates_needed)) {
 
         download.file(DL_URL,TMP_PATH, quiet=TRUE)
 
-
-
         tif_meta <- dplyr$tibble(
           unzip(TMP_PATH,list=T)
         )|>

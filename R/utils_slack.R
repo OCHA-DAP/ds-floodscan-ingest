@@ -94,6 +94,7 @@ slack_build_workflow_status <- function(run_id,include_dispatch = FALSE, branch 
   }
 
 
+
   df_sel <- dplyr$filter(
     df_runs,
     workflow_runs.event %in% events_include,
@@ -142,3 +143,4 @@ query_github <- function(run_id){
     jsonlite$fromJSON(flatten = TRUE) |>
     as.data.frame()
 }
+
