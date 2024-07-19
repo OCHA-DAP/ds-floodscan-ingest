@@ -50,9 +50,8 @@ jobs:
           Rscript .github/depends.R
 
       - name: R script - Run floodscan-cogs
-        run: |
-          source(file.path("src", "upload_latest_cog.R"))
-        shell: Rscript {0}
+        shell: bash
+        run: Rscript ./src/upoad_latest_cog.R
         env:
           DSCI_AZ_SAS_DEV: ${{ secrets.DSCI_AZ_SAS_DEV }}
           DSCI_AZ_ENDPOINT: ${{ secrets.DSCI_AZ_ENDPOINT }}
