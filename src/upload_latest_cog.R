@@ -19,7 +19,7 @@ run_date_chr <- format(run_date,"%Y%m%d")
 lr <- c("SFED","MFED") |>
   purrr::map(
     \(frac_type){
-      frac_type <- "SFED"
+      # frac_type <- "SFED"
 
       TMP_NAME <-  paste0("FloodScan_",frac_type,"_90d_",run_date_chr,".zip")
       TMP_PATH <- file.path(tempdir(), TMP_NAME)
