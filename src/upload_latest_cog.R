@@ -47,6 +47,10 @@ lr <- c("SFED","MFED") |>
           date_tif %in% dates_needed
         )
 
+      if(nrow(df_tifs_needed)==0){
+        logger$log_info("No {frac_type} tif updates available")
+      }
+
       unzip(
         TMP_PATH,
         exdir = td <- tempdir(),
