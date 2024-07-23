@@ -1,0 +1,537 @@
+---
+title: FloodScan SFED Data Simplification
+subtitle: Exploratory Smoothing & Thresholding
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+    embed-resoures: true
+    smooth-scroll: true
+execute:
+  include: true
+  echo: true
+  warning: false
+  message: false
+  eval: true
+  results: "asis"
+  out.width: "100%"
+  code-fold: true
+editor: visual
+---
+
+
+## Intro
+
+We are currently in the process of discussing a FloodScan product to make available on HDX. This notebooks is made to display and explore pros & cons of different options.
+
+There are several decisions to be made when preparing the files including:
+
+1. Threshold/filter value: It seems beneficial to apply some value threshold to the pixels to reduce overall noise in dataset. Previous analysis showed that very low SFED values were still useful in identifying flood events. Therefore in this notebook we explore a very low value of `1%`. All value below will be set to `0`.
+2. How/if to smooth historical average Day-of-Year (DOY) values. In this notebook we explore smoothing the average historical value with a 30 day centered window (+/- 15 days). It appears to be a suitable window.
+
+
+
+```{r}
+#' calculate day-of-year (doy) averages for "SFED" FloodScan
+#' upload result as single tif with 365/366 bands (one for each day)
+
+box::use(terra[...])
+box::use(sf[...])
+box::use(dplyr[...])
+box::use(AzureStor[...])
+box::use(stringr[...])
+box::use(lubridate[...])
+box::use(purrr[...])
+box::use(ggplot2[...])
+box::use(tidyr[...])
+box::use(rnaturalearth)
+box::use(extract = exactextractr)
+box::use(readr[...])
+box::use(gghdx[...])
+
+box::use(../src/utils/blob)
+box::use(paths =../R/path_utils)
+
+gghdx()
+Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
+Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
+
+# averages will be calculated from historical data up to this date
+END_DATE_BASELINE <- as.Date("2020-12-31")
+SFED_THRESHOLD <- 0.01
+
+bc <- blob$load_containers()
+gc <- bc$GLOBAL_CONT
+pc <- bc$PROJECTS_CONT
+
+```
+
+
+
+```{r}
+#| eval: false
+
+df_urls <- list_blobs(
+  container = gc,
+  prefix= "raster/cogs/aer"
+)
+
+
+df_urls <- df_urls |>
+  mutate(
+    date= as.Date(str_extract(name, "\\d{8}"),format = "%Y%m%d"),
+    doy = yday(date),
+    urls = paste0("/vsiaz/global/",name)
+  )
+
+# this will take 20 or so minutes.
+# Given the speed to similar operations in xarray I'd think there is a faster
+# way to do this. Regardless, trying to load all the urls with one
+# rast() call seems to time out while this looping/mapping strategy works
+# and is bearably effecient.
+
+doys <- unique(df_urls$doy)
+lr_doy_avg <- map(
+  doys,
+  \(doy_tmp){
+    cat(doy_tmp,"\n")
+    
+    # subset raster catalogue df by DOY
+    df_urls_filt <- df_urls |>
+      filter(
+        date<= END_DATE_BASELINE,
+        doy == doy_tmp
+      )
+    r <- rast(df_urls_filt$urls)
+    
+    r_sfed <- r[[names(r)=="SFED"]]
+    r_mean <- mean(r_sfed, na.rm=T)
+    
+    set.names(r_mean,as.character(doy_tmp)) # name band based on doy
+    r_mean
+  }
+)
+
+# merge list of rasters into 1 spatRaster
+r_doy_avg <- rast(lr_doy_avg)
+r_doy <- r_doy_avg[[as.character(1:366)]]
+r_doy[r_doy<=0.01]<-NA
+```
+
+
+
+```{r}
+#' Create n-day window for raster rolling aggregation of doy averages
+#' I can't use the simpler `terra::roll()` implementation as we only have
+#' 365 days & I want to aggregate days from December when it is early January.
+#' @param doy `integer` > 1. The size of the "window
+#' @param n `integer` size of window (in days)
+#' @param align 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+
+
+get_nday_window_seq <- function(doy,n,align = c("center")){
+  
+  if(align == "left") {
+    start <- doy-n
+    seq<- seq(from = start, length.out = n) %% 367
+    ret <- seq[seq!=0]  
+  }
+  
+  if(align == "center"){
+    start <- doy-(n/2)
+    
+    start_seq<- seq(from = start, length.out = n/2) %% 367
+    end_seq<- seq(from = doy, length.out = n/2) %% 367
+    full_seq <- c(start_seq,end_seq)
+    ret <- full_seq[full_seq!=0]  
+  }
+  ret
+  
+}
+
+
+
+
+doys_r <- names(r_doy)
+lr_smoothed_center_nday <- map(
+  doys_r,
+  \(doy_tmp){
+    last_n_doys <- get_nday_window_seq(doy = as.numeric(doy_tmp), n=30,align="center")
+    r_subset <- r_doy[[last_n_doys]]
+    r_mean <- mean(r_subset, na.rm=T)
+    set.names(r_mean, as.character(doy_tmp))
+    r_mean
+  }
+)
+
+r_smoothed_manual <- rast(lr_smoothed_center_nday)
+
+```
+
+
+
+```{r}
+#|eval: false
+
+r_smoothed <- roll(
+  x= r_doy,
+  n = 30,
+  fun = mean,
+  type = "around",
+  circular = TRUE,
+  na.rm = TRUE
+)
+# r_doy_smoothed <- r_smoothed_nday
+
+tf <- tempfile(fileext= ".tif")
+writeRaster(
+  r_smoothed,
+  filename = tf,
+  filetype = "COG",
+  gdal = c("COMPRESS=DEFLATE",
+           "SPARSE_OK=YES",
+           "OVERVIEW_RESAMPLING=AVERAGE")
+)
+
+
+upload_blob(
+  container = pc,
+  src = tf,
+  dest = "ds-floodscan-ingest/aer_area_300s_doy_mean_filtered_gte0.01_30d_smoothed_baseline_1998_2020.tif",
+)
+```
+
+```{r}
+#|eval: true
+
+fps <- paths$load_paths()
+
+r_smoothed_thresh <- rast(fps$FVP_DOY_SMOOTHED30D_THRESH_COG)
+r_doy_thresh <- rast(fps$FVP_DOY_THRESH_COG)
+
+r_smoothed <- rast(fps$FVP_DOY_NO_THRESH_SMOOTHED30d)
+r_doy <- rast(fps$FVP_DOY_NO_THRESH)
+
+gdf<- rnaturalearth$ne_countries(
+  country= c("Nigeria","Somalia"),
+  returnclass = "sf"
+) |> 
+  select(country=name)
+```
+
+```{r}
+r_crop <- list(
+  smooth_no_thresh = r_smoothed,
+  doy_no_thresh = r_doy,
+  smooth_thresh = r_smoothed_thresh,
+  doy_thresh= r_doy_thresh
+) |> 
+  map(
+    \(rtmp){
+      crop(rtmp, slice(gdf,1))
+    }
+  )
+plot(r_crop$doy_thresh[[1]])
+plot(r_crop$doy_no_thresh[[1]])
+plot(r_crop$smooth_thresh[[1]])
+plot(r_crop$smooth_no_thresh[[1]])
+
+```
+
+
+```{r zonalStats}
+#| eval: true
+# gdf<- rnaturalearth$ne_countries(
+#   country= c("Nigeria","Somalia"),
+#   returnclass = "sf"
+# ) |> 
+#   select(country=name)
+
+# un-thresholded
+zonal_doy <- extract$exact_extract(
+  r_doy,
+  gdf,
+  fun = "mean",
+  append_cols = "country"
+) |> 
+  pivot_longer(-country) |> 
+  separate(name, into = c("stat","doy"), sep = "\\.") |> 
+  mutate(
+    doy = parse_number(doy),
+    type = "unsmoothed"
+  )
+
+zonal_smooth <- extract$exact_extract(
+  r_smoothed,
+  gdf,
+  fun = "mean",
+  append_cols = "country"
+) |> 
+  pivot_longer(-country) |> 
+  separate(name, into = c("stat","doy"), sep = "\\.") |> 
+  mutate(
+    doy = parse_number(doy),
+    type = "smoothed"
+  )
+
+zonal_doy_thresh <- extract$exact_extract(
+  r_doy_thresh,
+  gdf,
+  fun = "mean",
+  append_cols = "country"
+) |> 
+  pivot_longer(-country) |> 
+  separate(name, into = c("stat","doy"), sep = "\\.") |> 
+  mutate(
+    doy = parse_number(doy),
+    type = "unsmoothed (thresholded)"
+  )
+
+zonal_smooth_thresh <- extract$exact_extract(
+  r_smoothed_thresh,
+  gdf,
+  fun = "mean",
+  append_cols = "country"
+) |> 
+  pivot_longer(-country) |> 
+  separate(name, into = c("stat","doy"), sep = "\\.") |> 
+  mutate(
+    doy = parse_number(doy),
+    type = "smoothed (thresholded)"
+  )
+
+
+df_zonal <- bind_rows(
+  zonal_doy,
+  zonal_smooth
+)
+
+df_zonal_thresh <- bind_rows(
+  zonal_doy_thresh,
+  zonal_smooth_thresh
+  
+)
+```
+
+
+```{r}
+df_zonal |> 
+  ggplot(
+    aes(
+      x=doy , y= value, color = as.factor(type)
+    )
+  ) +
+  geom_point(size=1)+
+  geom_line()+
+  facet_wrap(~country,nrow = 2, scales="free")+
+  labs(
+    title = "Zonal mean of historical average SFED by day of Year (DOY)",
+    subtitle = "Smoothed vs unsmooothed",
+    caption = "Smoothed version is 30d rolling mean"
+  )+
+  theme(
+    legend.title = element_blank()
+  )
+```
+
+
+
+
+```{r}
+
+df_zonal_thresh |> 
+  ggplot(
+    
+    aes(
+      x=doy , y= value, color = as.factor(type)
+    )
+  )+
+  geom_point(size=1)+
+  geom_line()+
+  facet_wrap(~country,nrow = 2, scales="free")+
+  labs(
+    title = "Historical average SFED by day of Year"
+  )+
+  theme(
+    legend.title = element_blank()
+  )
+
+```
+
+## Example of analyses enabled:
+
+```{r}
+box::use(leaflet[...])
+box::use(paths=../R/path_utils)
+sf_use_s2(FALSE)
+
+r_365d <- rast(paths$vp(fps$FP_LAST365D))
+SFED_THRESHOLD <- 0.01
+r_365d[r_365d<=SFED_THRESHOLD] <- 0
+
+gdf_africa <- rnaturalearth$ne_countries(continent= "Africa") |> 
+  st_make_valid() |> 
+  summarise()
+
+
+
+gdf_grid_africa <- st_make_grid(
+  gdf_africa,
+  # cellsize = units::as_units(50000,"metre"), 
+  cellsize = 5, # degrees
+  square = FALSE
+  ) |> 
+  st_as_sf() |> 
+  mutate(
+    grid_id = row_number()
+  )
+
+gdf_grid_africa <- gdf_grid_africa[gdf_africa,]
+
+# leaflet() |> 
+#   addTiles() |> 
+#   addPolygons(
+#     data= gdf_grid_africa
+#   )
+
+df_grid <- extract$exact_extract(
+  r_365d,
+  gdf_grid_africa,
+  fun = "mean",
+  append_cols = "grid_id"
+)
+
+
+df_grid_long <- df_grid |> 
+  pivot_longer(-grid_id) |> 
+  separate(name, into = c("stat","date"), sep = "\\.") 
+
+df_grid_long |> 
+  mutate(
+    doy = lubridate::yday(date)
+  ) |> 
+  left_join(
+    zonal_smooth_thresh
+  )
+#   ggplot(
+#     aes(
+#       x=grid_id, y= value
+#     )
+#   )+
+#   geom_point()+
+#   geom_line()+
+#   labs(
+#     title = "Historical average SFED by grid cell"
+# )
+#   
+```
+
+```{r}
+
+```
+
+
+
+## Appendix
+
+```{r}
+bind_rows(
+  zonal_doy_thresh,
+  zonal_doy
+) |> 
+  ggplot(
+    
+    aes(
+      x=doy , y= value, color = as.factor(type)
+    )
+  )+
+  geom_point(size=1)+
+  geom_line()+
+  facet_wrap(~country,nrow = 2, scales="free")+
+  labs(
+    title = "Historical average SFED by day of Year"
+  ) +
+  theme(
+    legend.title = element_blank()
+  )
+
+
+bind_rows(
+  zonal_smooth,
+  zonal_smooth_thresh
+  
+) |> 
+  ggplot(
+    
+    aes(
+      x=doy , y= value, color = as.factor(type)
+    )
+  )+
+  geom_point(size=1)+
+  geom_line()+
+  facet_wrap(~country,nrow = 2, scales="free")+
+  labs(
+    title = "Historical average SFED by day of Year"
+  )+
+  theme(
+    legend.title = element_blank()
+  )
+```
+
+```{r samplingPixels}
+#| eval: false
+
+set.seed(1234)
+# rnd_sample <- st_sample(r_doy_smoothed, n = 10)
+# sample_smooth <- terra::spatSample(x= r_doy_smoothed,size=10,xy=T)
+sample_smooth <- terra::spatSample(x= r_smoothed,size=10,xy=T)
+
+
+pts <- vect(sample_smooth[,c("x","y")], geom =c("x","y")) 
+
+sample_non_smooth<- terra::extract(x= r_doy, y= pts)
+```
+
+
+```{r}
+#|eval: false
+
+df_samples <- bind_rows(
+  sample_smooth |> 
+    mutate(
+      type = "smoothed",
+      row_id = row_number()
+    ),
+  sample_non_smooth |> 
+    mutate(
+      type = "non-smoothed",
+      row_id = row_number()
+    )  
+  
+)
+
+
+df_samples |> 
+  pivot_longer(
+    cols = -c("row_id","type")  
+  ) |> 
+  ggplot(
+    
+    aes(
+      x=name , y= value, color = as.factor(row_id)
+    )
+  )+
+  geom_point()+
+  geom_line()+
+  facet_wrap(~type)
+
+```
+
+
