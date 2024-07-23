@@ -50,6 +50,9 @@ box::use(rnaturalearth)
 box::use(extract = exactextractr)
 box::use(readr[...])
 box::use(gghdx[...])
+box::use(leaflet[...])
+box::use(paths=../R/path_utils)
+sf_use_s2(FALSE)
 
 box::use(../src/utils/blob)
 box::use(paths =../R/path_utils)
@@ -226,103 +229,67 @@ gdf<- rnaturalearth$ne_countries(
   select(country=name)
 ```
 
-```{r}
-r_crop <- list(
-  smooth_no_thresh = r_smoothed,
-  doy_no_thresh = r_doy,
-  smooth_thresh = r_smoothed_thresh,
-  doy_thresh= r_doy_thresh
-) |> 
-  map(
-    \(rtmp){
-      crop(rtmp, slice(gdf,1))
-    }
-  )
-plot(r_crop$doy_thresh[[1]])
-plot(r_crop$doy_no_thresh[[1]])
-plot(r_crop$smooth_thresh[[1]])
-plot(r_crop$smooth_no_thresh[[1]])
 
-```
 
 
 ```{r zonalStats}
 #| eval: true
-# gdf<- rnaturalearth$ne_countries(
-#   country= c("Nigeria","Somalia"),
-#   returnclass = "sf"
-# ) |> 
-#   select(country=name)
 
-# un-thresholded
-zonal_doy <- extract$exact_extract(
+lr_historical <- list(
   r_doy,
-  gdf,
-  fun = "mean",
-  append_cols = "country"
-) |> 
-  pivot_longer(-country) |> 
-  separate(name, into = c("stat","doy"), sep = "\\.") |> 
-  mutate(
-    doy = parse_number(doy),
-    type = "unsmoothed"
-  )
-
-zonal_smooth <- extract$exact_extract(
   r_smoothed,
-  gdf,
-  fun = "mean",
-  append_cols = "country"
-) |> 
-  pivot_longer(-country) |> 
-  separate(name, into = c("stat","doy"), sep = "\\.") |> 
-  mutate(
-    doy = parse_number(doy),
-    type = "smoothed"
-  )
-
-zonal_doy_thresh <- extract$exact_extract(
   r_doy_thresh,
-  gdf,
-  fun = "mean",
-  append_cols = "country"
-) |> 
-  pivot_longer(-country) |> 
-  separate(name, into = c("stat","doy"), sep = "\\.") |> 
-  mutate(
-    doy = parse_number(doy),
-    type = "unsmoothed (thresholded)"
-  )
-
-zonal_smooth_thresh <- extract$exact_extract(
-  r_smoothed_thresh,
-  gdf,
-  fun = "mean",
-  append_cols = "country"
-) |> 
-  pivot_longer(-country) |> 
-  separate(name, into = c("stat","doy"), sep = "\\.") |> 
-  mutate(
-    doy = parse_number(doy),
-    type = "smoothed (thresholded)"
-  )
-
-
-df_zonal <- bind_rows(
-  zonal_doy,
-  zonal_smooth
+  r_smoothed_thresh
+)
+l_historical_types <-  list(
+  "unsmoothed",
+  "smoothed",
+  "unsmoothed (thresholded)",
+  "smoothed (thresholded)"
+)
+lr_historical <- set_names(
+  lr_historical,
+  l_historical_types
 )
 
-df_zonal_thresh <- bind_rows(
-  zonal_doy_thresh,
-  zonal_smooth_thresh
-  
+ldf_zonal <- imap(
+  lr_historical,
+  \(rtmp,label_tmp){
+    extract$exact_extract(
+      rtmp,
+      gdf,
+      fun = "mean",
+      append_cols = "country"
+    ) |> 
+      pivot_longer(-country) |> 
+      separate(name, into = c("stat","doy"), sep = "\\.") |> 
+      mutate(
+        doy = parse_number(doy),
+        type = label_tmp
+      )
+  }
+)
+
+
+df_no_thresholds <- bind_rows(
+  ldf_zonal$unsmoothed,
+  ldf_zonal$smoothed
+)
+
+df_thresholds <- bind_rows(
+  ldf_zonal$`unsmoothed (thresholded)`,
+  ldf_zonal$`smoothed (thresholded)`
 )
 ```
 
+## Visualize Smoothing
+
+It's a bit tricky to visualize the exact effect of smoothing on individual pixels because there is alot of noise if you were to randomly sample pixels (i.e many pixels never flooded). Therefore, let's look at the zonal averages of two "random" countries: Somalia, Nigeria.
+
+In this first plot below we've calculated the the average SFED value per DOY (i.e 365 days) at the pixel-level for a historial baseline of 1998-2020. From that we calculated the 30 day rolling average (centered +/-15 days) also at Nigeria.
 
 ```{r}
-df_zonal |> 
+df_no_thresholds |> 
   ggplot(
     aes(
       x=doy , y= value, color = as.factor(type)
@@ -342,11 +309,11 @@ df_zonal |>
 ```
 
 
-
+The processing for the second plot followed the same process except a low-pass filter was applied with a threshold of 1%  SFED to remove noise. The smoothed raster was made by first taking the 30d rolling mean on the unthresholded raster and applying the 1% threshold to the smoothed result. The low pass filter was then applied to the non-smoothed raster and both results were plotted again after taking zonal means.
 
 ```{r}
 
-df_zonal_thresh |> 
+df_thresholds |> 
   ggplot(
     
     aes(
@@ -357,7 +324,9 @@ df_zonal_thresh |>
   geom_line()+
   facet_wrap(~country,nrow = 2, scales="free")+
   labs(
-    title = "Historical average SFED by day of Year"
+    title = "Zonal mean of historical average SFED by day of Year (DOY)",
+    subtitle = "Thresholded - Smoothed vs unsmooothed",
+    caption = "Smoothed version is 30d rolling mean"
   )+
   theme(
     legend.title = element_blank()
@@ -368,9 +337,7 @@ df_zonal_thresh |>
 ## Example of analyses enabled:
 
 ```{r}
-box::use(leaflet[...])
-box::use(paths=../R/path_utils)
-sf_use_s2(FALSE)
+
 
 r_365d <- rast(paths$vp(fps$FP_LAST365D))
 SFED_THRESHOLD <- 0.01
@@ -387,7 +354,7 @@ gdf_grid_africa <- st_make_grid(
   # cellsize = units::as_units(50000,"metre"), 
   cellsize = 5, # degrees
   square = FALSE
-  ) |> 
+) |> 
   st_as_sf() |> 
   mutate(
     grid_id = row_number()
