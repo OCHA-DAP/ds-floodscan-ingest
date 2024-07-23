@@ -12,8 +12,8 @@ on:
           options:
             - "TRUE"
             - "FALSE"
-      schedule:
-        - cron: '00 23 * * *' # Run every day at 11 pm
+  schedule:
+    - cron: '00 23 * * *' # Run every day at 11 pm
 jobs:
   monitor:
     runs-on: ubuntu-latest
