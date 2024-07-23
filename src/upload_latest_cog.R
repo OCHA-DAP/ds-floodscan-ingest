@@ -6,11 +6,12 @@ box::use(stringr)
 box::use(logger)
 box::use(AzureStor)
 box::use(glue)
-
+box::use(logger)
 box::use(./utils/blob)
 
 # if dry_run will not upload cogs to azure
 dry_run <- as.logical(Sys.getenv("DRY_RUN", unset = TRUE))
+logger$log_info("Dry run: {dry_run}")
 
 run_date <- Sys.Date()
 run_date_chr <- format(run_date,"%Y%m%d")
