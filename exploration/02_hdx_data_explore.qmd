@@ -11,7 +11,7 @@ format:
     smooth-scroll: true
 execute:
   include: true
-  echo: true
+  echo: false
   warning: false
   message: false
   eval: true
@@ -30,7 +30,10 @@ There are several decisions to be made when preparing the files including:
 
 1. Threshold/filter value: It seems beneficial to apply some value threshold to the pixels to reduce overall noise in dataset. Previous analysis showed that very low SFED values were still useful in identifying flood events. Therefore in this notebook we explore a very low value of `1%`. All value below will be set to `0`.
 2. How/if to smooth historical average Day-of-Year (DOY) values. In this notebook we explore smoothing the average historical value with a 30 day centered window (+/- 15 days). It appears to be a suitable window.
+3. What years to include in historical baseline. For the purpose of this notebook baseline is calculated from years 1998 (start of FloodScan) to 2020. Setting the the end year as 2020 specifically is arbitrary, but would help mute effect of any irregular years over the last 4 years on anomaly calculations.
 
+
+The processing of the data is all done in [data-raw/fs_baselines.R](insert link). This document reads the processed final and intermediate files for visualization and communication.
 
 
 ```{r}
@@ -39,19 +42,22 @@ There are several decisions to be made when preparing the files including:
 
 box::use(terra[...])
 box::use(sf[...])
+box::use(tidyterra[...])
 box::use(dplyr[...])
-box::use(AzureStor[...])
 box::use(stringr[...])
 box::use(lubridate[...])
 box::use(purrr[...])
 box::use(ggplot2[...])
+box::use(forcats[...])
 box::use(tidyr[...])
-box::use(rnaturalearth)
-box::use(extract = exactextractr)
 box::use(readr[...])
 box::use(gghdx[...])
-box::use(leaflet[...])
+box::use(rnaturalearth)
+box::use(extract = exactextractr)
+box::use(AzureStor[...])
+
 box::use(paths=../R/path_utils)
+box::use(../R/utils) # func to get fieldaps/
 sf_use_s2(FALSE)
 
 box::use(../src/utils/blob)
@@ -72,148 +78,7 @@ pc <- bc$PROJECTS_CONT
 ```
 
 
-
-```{r}
-#| eval: false
-
-df_urls <- list_blobs(
-  container = gc,
-  prefix= "raster/cogs/aer"
-)
-
-
-df_urls <- df_urls |>
-  mutate(
-    date= as.Date(str_extract(name, "\\d{8}"),format = "%Y%m%d"),
-    doy = yday(date),
-    urls = paste0("/vsiaz/global/",name)
-  )
-
-# this will take 20 or so minutes.
-# Given the speed to similar operations in xarray I'd think there is a faster
-# way to do this. Regardless, trying to load all the urls with one
-# rast() call seems to time out while this looping/mapping strategy works
-# and is bearably effecient.
-
-doys <- unique(df_urls$doy)
-lr_doy_avg <- map(
-  doys,
-  \(doy_tmp){
-    cat(doy_tmp,"\n")
-    
-    # subset raster catalogue df by DOY
-    df_urls_filt <- df_urls |>
-      filter(
-        date<= END_DATE_BASELINE,
-        doy == doy_tmp
-      )
-    r <- rast(df_urls_filt$urls)
-    
-    r_sfed <- r[[names(r)=="SFED"]]
-    r_mean <- mean(r_sfed, na.rm=T)
-    
-    set.names(r_mean,as.character(doy_tmp)) # name band based on doy
-    r_mean
-  }
-)
-
-# merge list of rasters into 1 spatRaster
-r_doy_avg <- rast(lr_doy_avg)
-r_doy <- r_doy_avg[[as.character(1:366)]]
-r_doy[r_doy<=0.01]<-NA
-```
-
-
-
-```{r}
-#' Create n-day window for raster rolling aggregation of doy averages
-#' I can't use the simpler `terra::roll()` implementation as we only have
-#' 365 days & I want to aggregate days from December when it is early January.
-#' @param doy `integer` > 1. The size of the "window
-#' @param n `integer` size of window (in days)
-#' @param align 
-#'
-#' @return
-#' @export
-#'
-#' @examples
-
-
-get_nday_window_seq <- function(doy,n,align = c("center")){
-  
-  if(align == "left") {
-    start <- doy-n
-    seq<- seq(from = start, length.out = n) %% 367
-    ret <- seq[seq!=0]  
-  }
-  
-  if(align == "center"){
-    start <- doy-(n/2)
-    
-    start_seq<- seq(from = start, length.out = n/2) %% 367
-    end_seq<- seq(from = doy, length.out = n/2) %% 367
-    full_seq <- c(start_seq,end_seq)
-    ret <- full_seq[full_seq!=0]  
-  }
-  ret
-  
-}
-
-
-
-
-doys_r <- names(r_doy)
-lr_smoothed_center_nday <- map(
-  doys_r,
-  \(doy_tmp){
-    last_n_doys <- get_nday_window_seq(doy = as.numeric(doy_tmp), n=30,align="center")
-    r_subset <- r_doy[[last_n_doys]]
-    r_mean <- mean(r_subset, na.rm=T)
-    set.names(r_mean, as.character(doy_tmp))
-    r_mean
-  }
-)
-
-r_smoothed_manual <- rast(lr_smoothed_center_nday)
-
-```
-
-
-
-```{r}
-#|eval: false
-
-r_smoothed <- roll(
-  x= r_doy,
-  n = 30,
-  fun = mean,
-  type = "around",
-  circular = TRUE,
-  na.rm = TRUE
-)
-# r_doy_smoothed <- r_smoothed_nday
-
-tf <- tempfile(fileext= ".tif")
-writeRaster(
-  r_smoothed,
-  filename = tf,
-  filetype = "COG",
-  gdal = c("COMPRESS=DEFLATE",
-           "SPARSE_OK=YES",
-           "OVERVIEW_RESAMPLING=AVERAGE")
-)
-
-
-upload_blob(
-  container = pc,
-  src = tf,
-  dest = "ds-floodscan-ingest/aer_area_300s_doy_mean_filtered_gte0.01_30d_smoothed_baseline_1998_2020.tif",
-)
-```
-
-```{r}
-#|eval: true
-
+```{r loadData}
 fps <- paths$load_paths()
 
 r_smoothed_thresh <- rast(fps$FVP_DOY_SMOOTHED30D_THRESH_COG)
@@ -241,12 +106,14 @@ lr_historical <- list(
   r_doy_thresh,
   r_smoothed_thresh
 )
+
 l_historical_types <-  list(
   "unsmoothed",
   "smoothed",
   "unsmoothed (thresholded)",
   "smoothed (thresholded)"
 )
+
 lr_historical <- set_names(
   lr_historical,
   l_historical_types
@@ -259,7 +126,8 @@ ldf_zonal <- imap(
       rtmp,
       gdf,
       fun = "mean",
-      append_cols = "country"
+      append_cols = "country",
+      progress = FALSE
     ) |> 
       pivot_longer(-country) |> 
       separate(name, into = c("stat","doy"), sep = "\\.") |> 
@@ -288,7 +156,7 @@ It's a bit tricky to visualize the exact effect of smoothing on individual pixel
 
 In this first plot below we've calculated the the average SFED value per DOY (i.e 365 days) at the pixel-level for a historial baseline of 1998-2020. From that we calculated the 30 day rolling average (centered +/-15 days) also at Nigeria.
 
-```{r}
+```{r plotNoThresholds}
 df_no_thresholds |> 
   ggplot(
     aes(
@@ -311,7 +179,7 @@ df_no_thresholds |>
 
 The processing for the second plot followed the same process except a low-pass filter was applied with a threshold of 1%  SFED to remove noise. The smoothed raster was made by first taking the 30d rolling mean on the unthresholded raster and applying the 1% threshold to the smoothed result. The low pass filter was then applied to the non-smoothed raster and both results were plotted again after taking zonal means.
 
-```{r}
+```{r plotWThresholds}
 
 df_thresholds |> 
   ggplot(
@@ -334,14 +202,295 @@ df_thresholds |>
 
 ```
 
-## Example of analyses enabled:
+## Examples of analyses enabled:
+
+Here are just some quick ideas of different types of analyses that could be easily done with the data package. These are all experimental and just some first attempts
+
+### real time monitoring
+
+I will extend the time range from 90d to 365 just for the purpose of providing more context as I don't know of a specific flood event off the top of the head to look for in the last 90days. However, I do know that there as quite a bit of flooding reported in Somalia at the end of 2023 & early 2024.
 
 ```{r}
 
+# since we already had nga & som loaded, lets filter to just one
+gdf_aoi <- gdf |> 
+  filter(
+    country == "Somalia"
+  )
+# open up recent data raster
+r_365d <- rast(paths$vp(fps$FP_LAST365D_THRESH))
 
-r_365d <- rast(paths$vp(fps$FP_LAST365D))
-SFED_THRESHOLD <- 0.01
-r_365d[r_365d<=SFED_THRESHOLD] <- 0
+# open up smoothed baseline
+r_historical <- rast(paths$vp(fps$FP_DOY_SMOOTHED30D_THRESH_COG))
+
+# crop for simplification
+lr_crop <- map(
+  list(
+    "RECENT_365" = r_365d,
+    "HISTORICAL" = r_historical
+  ), \(r_tmp){
+    crop(r_tmp, gdf_aoi)
+  }
+)
+
+lr_diff <- names(lr_crop$RECENT_365) |> 
+  map(
+    \(dt_tmp_str){
+      dt_tmp <- as.Date(dt_tmp_str)
+      doy_tmp <- yday(dt_tmp)
+      r_diff_tmp <- lr_crop$RECENT_365[[dt_tmp_str ]] - lr_crop$HISTORICAL[[doy_tmp]]
+      r_diff_tmp
+    }
+  )
+
+r_diff <-  rast(lr_diff)
+
+gdf_som_adm2 <- utils$download_fieldmaps_sf(iso3 = "som",layer = "som_adm2")
+
+
+ df_zonal_anom_som_adm2 <- extract$exact_extract(
+        r_diff,
+        gdf_som_adm2$som_adm2,
+        fun = "mean",
+        append_cols = c("ADM2_EN","ADM2_PCODE","ADM1_EN","ADM1_PCODE"), 
+        progress = FALSE
+      ) |> 
+        pivot_longer(-starts_with("ADM")) |> 
+        separate(name, into = c("stat","date"), sep = "\\.") |> 
+   mutate(
+     date= as.Date(date)
+   )
+ 
+ 
+ top3_anoms <- df_zonal_anom_som_adm2 |> 
+   group_by(ADM2_EN,ADM2_PCODE) |> 
+   summarise(
+     value = max(value),
+     .groups="drop"
+   ) |> 
+   slice_max(order_by = value, n= 3)
+ 
+# RColorBrewer::brewer.pal(5,"Blues")
+pal <- c( "#08519C","#3182BD" ,"#6BAED6" ,"grey")
+ 
+
+ df_zonal_anom_som_adm2 <- df_zonal_anom_som_adm2 |> 
+   mutate(
+     line_color = if_else(ADM2_EN %in% top3_anoms$ADM2_EN, ADM2_EN, "Other"),
+     line_color = fct_relevel(line_color, top3_anoms$ADM2_EN,"Other")
+   ) 
+ 
+ 
+ p_sfed_365_somalia <- df_zonal_anom_som_adm2 |> 
+   ggplot(
+     aes(x= date,
+         y= value,
+         color = line_color,
+         group=ADM2_EN,
+         alpha= line_color)
+   )+
+   # geom_point(size=1, alpha=0.4)+
+   geom_line() + 
+   scale_alpha_manual(values = c(1,1,1,0.4))+
+   scale_color_manual(values = pal)+
+   scale_x_date(date_breaks = "2 week",date_labels = "%e %b")+
+   labs(
+     y= "SFED Anomaly (absolute)",
+     title = "SFED Anomaly Somalia Admin 2 - Last 365 Days"
+   )+
+   theme(
+     axis.text.x = element_text(angle = 90),
+     legend.title = element_blank()
+   )
+  
+   
+ 
+ gdf_som_adm2 <- gdf_som_adm2$som_adm2 |> 
+   mutate(
+     top3_sfed = ADM2_EN %in% top3_anoms$ADM2_EN
+   )
+ 
+m_high_districts <-  ggplot() +
+   geom_sf(
+     data = gdf_som_adm2,
+     aes(fill = top3_sfed)
+   )+
+   scale_fill_manual(values = c("white","tomato"))+
+   labs(
+     title = "Districts with highest SFED anomaly in last year"
+   )+
+   theme(
+     legend.position = "none",
+     legend.title = element_blank()
+   )
+ 
+ # facet_wrap(~ADM1_EN)
+
+
+dates_dec_mid_jan <- as.character(seq(
+  as.Date("2023-12-01"),
+  as.Date("2024-01-15"),
+  by = "day"
+  
+)
+)
+
+r_mean_composite <- mean(r_diff[[dates_dec_mid_jan]] )
+p_map_raster_dec_jan <- ggplot()+
+  geom_spatraster(
+    data= r_mean_composite
+  )+
+  scale_fill_viridis_b()+
+  geom_sf(
+    data = gdf_som_adm2, fill =NA, color ="white"
+  )+
+  labs(
+    title = "Max flooding anomaly composite (01 Dec 2023 - 15 Jan 2024)"
+  )
+
+# box::use(patchwork[...])
+# p_sfed_365_somalia+
+#   m_high_districts+
+#   p_map_raster_dec_jan+ 
+#   plot_layout(ncol = 1)
+```
+
+```{r}
+#| out.width: 100%
+
+p_sfed_365_somalia
+```
+
+```{r}
+#| out.width: 100%
+
+m_high_districts
+```
+
+```{r}
+#| out.width: 100%
+
+p_map_raster_dec_jan
+```
+
+## Appendix
+
+
+```{r calculatePixelAnoms}
+#| eval: false
+
+# Below we map out the anomaly for the last 3 days at the raster pixel level.
+
+# since we already had nga & som loaded, lets filter to just one
+gdf_aoi <- gdf |> 
+  filter(
+    country == "Somalia"
+  )
+# open up recent data raster
+r_90d <- rast(paths$vp(fps$FP_LAST90D))
+
+# open up smoothed baseline
+r_historical <- rast(paths$vp(fps$FP_DOY_SMOOTHED30D_THRESH_COG))
+
+# crop for simplification
+lr_crop <- map(
+  list(
+    "RECENT_90" = r_90d,
+    "HISTORICAL" = r_historical
+  ), \(r_tmp){
+    crop(r_tmp, gdf_aoi)
+  }
+)
+
+
+dates_monitor <- sort(as.Date(names(lr_crop$RECENT_90)),decreasing = T)[1:7]
+doys_monitor <- yday(dates_monitor)
+
+r_recent_monitor <- lr_crop$RECENT_90[[as.character(dates_monitor)]]
+r_historical_monitor <- lr_crop$HISTORICAL[[doys_monitor]]
+
+r_diff_anomaly <- r_recent_monitor - r_historical_monitor
+r_pct_anomaly <- r_diff_anomaly / r_historical_monitor
+```
+
+
+```{r mapPixelAnoms}
+#| eval: false
+
+ggplot() +
+  geom_spatraster(data=r_diff_anomaly[[1:5]])+
+  scale_fill_viridis_b()+
+  facet_wrap(~lyr)+
+  geom_sf(data = gdf_aoi , fill =NA, color ="white")+
+  labs(
+    title = "Rainfall anomaly past 3 days"
+  )+
+  theme(
+    legend.text = element_text(angle =90 )
+  )
+
+ggplot() +
+  geom_spatraster(data=r_pct_anomaly[[1:5]])+
+  scale_fill_viridis_b()+
+  facet_wrap(~lyr)+
+  geom_sf(data = gdf_aoi , fill =NA, color ="white")+
+  labs(
+    title = "Rainfall anomaly past 3 days"
+  )+
+  theme(
+    legend.text = element_text(angle =90 )
+  )
+  
+```
+
+
+We can also take zonal stats of the AOI and see the zonal level anomalies.
+```{r zonalAnoms}
+#| eval: false
+
+# lets just quickly change the historical doys to dates so we can align on one graph
+dates_from_doy <- as.Date("2024-01-01")+(as.numeric(names(r_historical_monitor))-1)
+set.names(r_historical_monitor,dates_from_doy)
+
+df_zonal_recent_monitor <- 
+  imap(
+    list(
+      "RECENT" = r_recent_monitor,
+      "HISTORICAL" = r_historical_monitor,
+      "DIFF_ANOM" = r_diff_anomaly
+    ),
+    \(r_tmp,label_tmp){
+      extract$exact_extract(
+        r_tmp,
+        gdf_aoi,
+        fun = "mean",
+        append_cols = "country",
+        progress = FALSE
+      ) |> 
+        pivot_longer(-country) |> 
+        separate(name, into = c("stat","date"), sep = "\\.") |> 
+        mutate(
+          # doy = parse_number(doy),
+          type = label_tmp,
+          facet_split = if_else(type %in% c("RECENT","HISTORICAL"), "SFED Avg", "SFED Anomaly (absolute)")
+        )
+    }
+  ) |> 
+  list_rbind()
+
+df_zonal_recent_monitor |> 
+  ggplot(
+    aes(x= date , y= value, color =type, group=type)
+  )+
+  geom_point()+
+  geom_line()+
+  facet_wrap(~facet_split,scales = "free",nrow = 2)
+```
+
+
+```{r}
+#| eval: false
+
 
 gdf_africa <- rnaturalearth$ne_countries(continent= "Africa") |> 
   st_make_valid() |> 
@@ -401,14 +550,8 @@ df_grid_long |>
 ```
 
 ```{r}
+#| eval: false
 
-```
-
-
-
-## Appendix
-
-```{r}
 bind_rows(
   zonal_doy_thresh,
   zonal_doy
@@ -468,7 +611,7 @@ sample_non_smooth<- terra::extract(x= r_doy, y= pts)
 
 
 ```{r}
-#|eval: false
+#| eval: false
 
 df_samples <- bind_rows(
   sample_smooth |> 

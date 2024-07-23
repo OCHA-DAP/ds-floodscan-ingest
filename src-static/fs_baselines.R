@@ -14,6 +14,11 @@ box::use(../src/utils/blob)
 box::use(paths = ../R/path_utils)
 # box::reload(paths)
 
+extract_date <-  function(x){
+  as.Date(str_extract(x, "\\d{8}"),format = "%Y%m%d")
+}
+
+
 
 
 Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
@@ -214,7 +219,7 @@ upload_blob(
 r_doy_avg_sorted <- rast("/vsiaz/projects/ds-floodscan-ingest/aer_area_300s_doy_mean_baseline_1998_2020.tif")
 
 
-r_doy_avg_sorted[r_doy_avg_sorted <= SFED_THRESHOLD]<-0
+r_doy_avg_sorted[r_doy_avg_sorted <= SFED_THRESHOLD] <- 0
 
 r_crop_viz <- crop(r_doy_avg_sorted, slice(gdf,1))
 plot(r_crop_viz[[1]])
@@ -249,15 +254,18 @@ df_urls_recent <- df_urls |>
   slice(1:365)
 
 r_365d <- rast(df_urls_recent$urls)
+
+# subset to SFED only
 r_365d_sfed <- r_365d[[names(r_365d)=="SFED"]]
 
-extract_date <-  function(x){
-  as.Date(str_extract(x, "\\d{8}"),format = "%Y%m%d")
-}
-
-
+# rename lyr/band to date.
 r_dates <- extract_date(basename(sources(r_365d_sfed)))
 set.names(r_365d_sfed, r_dates)
+
+r_365d_sfed[r_365d_sfed <= SFED_THRESHOLD] <- 0
+
+
+
 
 
 
@@ -276,6 +284,26 @@ writeRaster(
 upload_blob(
   container = pc,
   src = tf,
-  dest = fps$FP_LAST365D
+  dest = fps$FP_LAST365D_THRESH
+)
+
+
+# 90d Sample --------------------------------------------------------------
+r_90d <- r_365d_sfed[[1:90]]
+tf <- tempfile(fileext= ".tif")
+writeRaster(
+  r_90d,
+  filename = tf,
+  filetype = "COG",
+  gdal = c("COMPRESS=DEFLATE",
+           "SPARSE_OK=YES",
+           "OVERVIEW_RESAMPLING=AVERAGE"),
+  overwrite = TRUE
+)
+
+upload_blob(
+  container = pc,
+  src = tf,
+  dest = fps$FP_LAST90D_THRESH
 )
 

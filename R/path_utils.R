@@ -29,6 +29,9 @@ load_paths <-function(){
   ret$FP_LAST365D_THRESH = "ds-floodscan-ingest/aer_area_300s_last_365d_sfed_gte0.01.tif"
   ret$FVP_LAST365D_THRESH = vp(ret$FP_LAST365D_THRESH)
 
+
+  ret$FP_LAST90D_THRESH = "ds-floodscan-ingest/aer_area_300s_90d_sfed_example.tif"
+
   ret
 
 }
