@@ -57,6 +57,6 @@ jobs:
         run: |
           Rscript .github/depends.R
 
-      # - name: R script - Run floodscan-cogs
-      #   shell: bash
-      #   run: Rscript ./src/upload_latest_cog.R
+      - name: R script - Run floodscan-cogs
+        shell: bash
+        run: Rscript ./src/upload_latest_cog.R
