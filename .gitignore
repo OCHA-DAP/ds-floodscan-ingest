@@ -8,3 +8,4 @@
 *.tif
 *.html
 .scrap/*
+exploration/rsconnect/*

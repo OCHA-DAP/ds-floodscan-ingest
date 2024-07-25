@@ -1,6 +1,6 @@
 ---
 title: FloodScan SFED Data Simplification
-subtitle: Exploratory Smoothing & Thresholding
+subtitle: Exploratory Smoothing & Examples
 format:
   html:
     toc: true
@@ -11,7 +11,7 @@ format:
     smooth-scroll: true
 execute:
   include: true
-  echo: false
+  echo: true
   warning: false
   message: false
   eval: true
@@ -21,24 +21,19 @@ execute:
 editor: visual
 ---
 
-
 ## Intro
 
 We are currently in the process of discussing a FloodScan product to make available on HDX. This notebooks is made to display and explore pros & cons of different options.
 
 There are several decisions to be made when preparing the files including:
 
-1. Threshold/filter value: It seems beneficial to apply some value threshold to the pixels to reduce overall noise in dataset. Previous analysis showed that very low SFED values were still useful in identifying flood events. Therefore in this notebook we explore a very low value of `1%`. All value below will be set to `0`.
-2. How/if to smooth historical average Day-of-Year (DOY) values. In this notebook we explore smoothing the average historical value with a 30 day centered window (+/- 15 days). It appears to be a suitable window.
-3. What years to include in historical baseline. For the purpose of this notebook baseline is calculated from years 1998 (start of FloodScan) to 2020. Setting the the end year as 2020 specifically is arbitrary, but would help mute effect of any irregular years over the last 4 years on anomaly calculations.
+1.  Threshold/filter value: It seems beneficial to apply some value threshold to the pixels to reduce overall noise in data set. Previous analysis showed that very low SFED values were still useful in identifying flood events. Therefore in this notebook we explore a very low value of `1%`. All value below will be set to `0`.
+2.  How/if to smooth historical average Day-of-Year (DOY) values. In this notebook we explore smoothing the average historical value with a 30 day centered window (+/- 15 days). It appears to be a suitable window.
+3.  What years to include in historical baseline. For the purpose of this notebook baseline is calculated from years 1998 (start of FloodScan) to 2020. Setting the the end year as 2020 specifically is arbitrary, but would help mute effect of any irregular years over the last 4 years on anomaly calculations.
 
-
-The processing of the data is all done in [data-raw/fs_baselines.R](insert link). This document reads the processed final and intermediate files for visualization and communication.
-
+The processing of the data is all done in [data-raw/fs_baselines.R](https://github.com/OCHA-DAP/ds-floodscan-ingest/blob/hdx-data-example/src-static/fs_baselines.R). This document reads the processed final and intermediate files for visualization and communication.
 
 ```{r}
-#' calculate day-of-year (doy) averages for "SFED" FloodScan
-#' upload result as single tif with 365/366 bands (one for each day)
 
 box::use(terra[...])
 box::use(sf[...])
@@ -56,7 +51,7 @@ box::use(rnaturalearth)
 box::use(extract = exactextractr)
 box::use(AzureStor[...])
 
-box::use(paths=../R/path_utils)
+box::use(paths=../R/path_utils[load_paths,vp])
 box::use(../R/utils) # func to get fieldaps/
 sf_use_s2(FALSE)
 
@@ -77,14 +72,27 @@ pc <- bc$PROJECTS_CONT
 
 ```
 
-
 ```{r loadData}
-fps <- paths$load_paths()
 
+fps <- load_paths()
+
+# SMOOTHED 30d - THRESHOLDED
 r_smoothed_thresh <- rast(fps$FVP_DOY_SMOOTHED30D_THRESH_COG)
+
+# NON-SMOOTH - THRESHOLDED
 r_doy_thresh <- rast(fps$FVP_DOY_THRESH_COG)
 
+# SMOOTHED 20d - Thresholded
+r_smoothed20_thresh <- rast(vp(fps$FP_DOY_SMOOTHED20D_THRESH_COG))
+
+
+# SMOOTH 30d - NO THRESHOLD
 r_smoothed <- rast(fps$FVP_DOY_NO_THRESH_SMOOTHED30d)
+
+# SMOOTH 20d - NO THRESHOLD
+r_smoothed20 <- rast(vp(fps$FP_DOY_NO_THRESH_SMOOTHED20d))
+
+# NON-SMOOTH - NO THRESHOLD
 r_doy <- rast(fps$FVP_DOY_NO_THRESH)
 
 gdf<- rnaturalearth$ne_countries(
@@ -94,9 +102,6 @@ gdf<- rnaturalearth$ne_countries(
   select(country=name)
 ```
 
-
-
-
 ```{r zonalStats}
 #| eval: true
 
@@ -104,14 +109,18 @@ lr_historical <- list(
   r_doy,
   r_smoothed,
   r_doy_thresh,
-  r_smoothed_thresh
+  r_smoothed_thresh,
+  r_smoothed20,
+  r_smoothed20_thresh
 )
 
 l_historical_types <-  list(
   "unsmoothed",
-  "smoothed",
+  "smoothed 30d",
   "unsmoothed (thresholded)",
-  "smoothed (thresholded)"
+  "smoothed 30d (thresholded)",
+  "smoothed 20d",
+  "smoothed 20d (thresholded)"
 )
 
 lr_historical <- set_names(
@@ -141,12 +150,14 @@ ldf_zonal <- imap(
 
 df_no_thresholds <- bind_rows(
   ldf_zonal$unsmoothed,
-  ldf_zonal$smoothed
+  ldf_zonal$`smoothed 30d`,
+  ldf_zonal$`smoothed 20d`
 )
 
 df_thresholds <- bind_rows(
   ldf_zonal$`unsmoothed (thresholded)`,
-  ldf_zonal$`smoothed (thresholded)`
+  ldf_zonal$`smoothed 30d (thresholded)`,
+  ldf_zonal$`smoothed 20d (thresholded)`
 )
 ```
 
@@ -154,52 +165,71 @@ df_thresholds <- bind_rows(
 
 It's a bit tricky to visualize the exact effect of smoothing on individual pixels because there is alot of noise if you were to randomly sample pixels (i.e many pixels never flooded). Therefore, let's look at the zonal averages of two "random" countries: Somalia, Nigeria.
 
-In this first plot below we've calculated the the average SFED value per DOY (i.e 365 days) at the pixel-level for a historial baseline of 1998-2020. From that we calculated the 30 day rolling average (centered +/-15 days) also at Nigeria.
+In this first plot below we've calculated the the average SFED value per DOY (i.e 365 days) at the pixel-level for a historical baseline of 1998-2020. From that we calculated the 30 day rolling average (centered +/-15 days) as well as the 20d (+/-10 days) rolling average. Then we calculated the zonal mean for the admin 0 boundaries of Somalia and Nigeria.
+
+You can see in Somalia, due to the sharpness of the curves and volatility of the historical DOY data the effect of smoothing is to dampen/lower the peak values. The more you smooth the greater this effect which makes sense. This is less the case in Somalia where the general trend is less abrupt and volatile. I wonder if some of the volatility we see in the DOY historical (red line) in Somalia might also be due to outliers driving the trend (perhaps the 2nd peak past 300 days). Nonetheless anomalies could be calculated using either smoothing window, but for now we can recommend +/-10d.
+
 
 ```{r plotNoThresholds}
 df_no_thresholds |> 
   ggplot(
     aes(
-      x=doy , y= value, color = as.factor(type)
+      x=doy ,
+      y= value, 
+      color = as.factor(type)
     )
   ) +
-  geom_point(size=1)+
+  geom_point(size=1,alpha=0.2)+
   geom_line()+
+  scale_color_manual(
+    values = c(
+      "unsmoothed" = hdx_hex("tomato-hdx"), 
+      "smoothed 30d" = hdx_hex("sapphire-hdx"), 
+      "smoothed 20d" = hdx_hex("mint-hdx")
+    )
+  )+
   facet_wrap(~country,nrow = 2, scales="free")+
   labs(
     title = "Zonal mean of historical average SFED by day of Year (DOY)",
-    subtitle = "Smoothed vs unsmooothed",
-    caption = "Smoothed version is 30d rolling mean"
+    subtitle = "Smoothed vs unsmooothed"
+    # caption = "Smoothed version is 30d rolling mean"
   )+
   theme(
     legend.title = element_blank()
   )
 ```
 
-
-The processing for the second plot followed the same process except a low-pass filter was applied with a threshold of 1%  SFED to remove noise. The smoothed raster was made by first taking the 30d rolling mean on the unthresholded raster and applying the 1% threshold to the smoothed result. The low pass filter was then applied to the non-smoothed raster and both results were plotted again after taking zonal means.
+The processing for the second plot followed the same process except a low-pass filter was applied with a threshold of 1% SFED to remove noise. The smoothed raster was made by first taking the 30d rolling mean on the un-thresholded raster and applying the 1% threshold to the smoothed result. The low pass filter was then applied to the non-smoothed raster and both results were plotted again after taking zonal means.
 
 ```{r plotWThresholds}
 
 df_thresholds |> 
+  mutate(
+    legend_label = str_remove_all(type," \\(.*\\)")
+  ) |> 
   ggplot(
-    
     aes(
-      x=doy , y= value, color = as.factor(type)
+      x=doy , y= value, color = legend_label
     )
   )+
-  geom_point(size=1)+
+  geom_point(size=1,alpha=0.2)+
   geom_line()+
+    scale_color_manual(
+    values = c(
+      "unsmoothed" = hdx_hex("tomato-hdx"), 
+      "smoothed 30d" = hdx_hex("sapphire-hdx"),
+      "smoothed 20d" = hdx_hex("mint-hdx")
+    )
+  )+
   facet_wrap(~country,nrow = 2, scales="free")+
   labs(
     title = "Zonal mean of historical average SFED by day of Year (DOY)",
     subtitle = "Thresholded - Smoothed vs unsmooothed",
-    caption = "Smoothed version is 30d rolling mean"
+    caption = "Threshold of SFED 1 % applied at pixel level before zonal aggregation"
   )+
   theme(
     legend.title = element_blank()
   )
-
 ```
 
 ## Examples of analyses enabled:
@@ -208,7 +238,7 @@ Here are just some quick ideas of different types of analyses that could be easi
 
 ### real time monitoring
 
-I will extend the time range from 90d to 365 just for the purpose of providing more context as I don't know of a specific flood event off the top of the head to look for in the last 90days. However, I do know that there as quite a bit of flooding reported in Somalia at the end of 2023 & early 2024.
+I will extend the time range beyond that of an individual 90d file we plan to share for purpose of providing more context as I don't know of specific flood events off the top of my head to look for in the last 90days. However, I do know that there as quite a bit of flooding reported in Somalia at the end of 2023 & early 2024. Therefore, let's exchange the range for the last 365 and draw some plots. We can pretend we were monitoring over the past 365 days and see if any of the plots/visuals look promising for being useful.
 
 ```{r}
 
@@ -345,7 +375,8 @@ p_map_raster_dec_jan <- ggplot()+
     data = gdf_som_adm2, fill =NA, color ="white"
   )+
   labs(
-    title = "Max flooding anomaly composite (01 Dec 2023 - 15 Jan 2024)"
+    title = "Mean flooding anomaly composite",
+    subtitle =  "01 Dec 2023 - 15 Jan 2024"
   )
 
 # box::use(patchwork[...])
@@ -355,11 +386,15 @@ p_map_raster_dec_jan <- ggplot()+
 #   plot_layout(ncol = 1)
 ```
 
+I think it is pretty clear from this first plot that we see large positive SFED flood anomalies in Dec 23'/Jan24' which does align with field reporting.
+
 ```{r}
 #| out.width: 100%
 
 p_sfed_365_somalia
 ```
+
+Here we've plotted the top 3 districts with the highest SFED anomaly in the last year.
 
 ```{r}
 #| out.width: 100%
@@ -367,14 +402,21 @@ p_sfed_365_somalia
 m_high_districts
 ```
 
+And finally we create and plot an average composite raster of the positively anomalous period (Dec 23'- mid Jan 24') to get a qualitative view of areas with most flooding
+
 ```{r}
 #| out.width: 100%
 
 p_map_raster_dec_jan
 ```
 
-## Appendix
+## Discussion
 
+Even from this rough analysis, it's clear that real time analysis of SFED anomalies has the potential to benefit monitoring systems made at various scales (sub-national, national, regional, and global). The purpose of this document is not to thoroughly investigate a methodology, but explain the data sources that we are considering processing and putting on HDX and demonstrate a few basic families of analyses that can easily be done with those products.
+
+**Admin level aggregations:** We are considering what admin level aggregations of this data could be included in the data package. Since flooding can occur within a country at a large scale in uninhabited area(s), it seems appropriate to caution against admin 0 (national) level aggregations without the integration of exposure metrics/data into the analysis. One potential option would be to integrate a population raster or building footprint similar to the flood risk analysis done to support the Somalia 2023 HRP. It could be reasonable to do a pure SFED anomaly analysis at lower levels such as admin 2/3 (similar to what was done above) or custom/common grid so that people could contextualize the indicated risk of any anomalous values.
+
+## Appendix
 
 ```{r calculatePixelAnoms}
 #| eval: false
@@ -413,7 +455,6 @@ r_diff_anomaly <- r_recent_monitor - r_historical_monitor
 r_pct_anomaly <- r_diff_anomaly / r_historical_monitor
 ```
 
-
 ```{r mapPixelAnoms}
 #| eval: false
 
@@ -443,10 +484,10 @@ ggplot() +
   
 ```
 
-
-We can also take zonal stats of the AOI and see the zonal level anomalies.
 ```{r zonalAnoms}
 #| eval: false
+
+# We can also take zonal stats of the AOI and see the zonal level anomalies.
 
 # lets just quickly change the historical doys to dates so we can align on one graph
 dates_from_doy <- as.Date("2024-01-01")+(as.numeric(names(r_historical_monitor))-1)
@@ -487,7 +528,6 @@ df_zonal_recent_monitor |>
   facet_wrap(~facet_split,scales = "free",nrow = 2)
 ```
 
-
 ```{r}
 #| eval: false
 
@@ -500,7 +540,7 @@ gdf_africa <- rnaturalearth$ne_countries(continent= "Africa") |>
 
 gdf_grid_africa <- st_make_grid(
   gdf_africa,
-  # cellsize = units::as_units(50000,"metre"), 
+  # cell size = units::as_units(50000,"metre"), 
   cellsize = 5, # degrees
   square = FALSE
 ) |> 
@@ -609,7 +649,6 @@ pts <- vect(sample_smooth[,c("x","y")], geom =c("x","y"))
 sample_non_smooth<- terra::extract(x= r_doy, y= pts)
 ```
 
-
 ```{r}
 #| eval: false
 
@@ -643,5 +682,3 @@ df_samples |>
   facet_wrap(~type)
 
 ```
-
-

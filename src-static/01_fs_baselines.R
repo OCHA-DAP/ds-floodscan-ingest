@@ -12,7 +12,7 @@ box::use(purrr[...])
 
 box::use(../src/utils/blob)
 box::use(paths = ../R/path_utils)
-# box::reload(paths)
+box::reload(paths)
 
 extract_date <-  function(x){
   as.Date(str_extract(x, "\\d{8}"),format = "%Y%m%d")
@@ -133,6 +133,17 @@ r_smoothed <- roll(
   circular = TRUE,
   na.rm = TRUE
 )
+
+r_smoothed_20 <- roll(
+  x= r_doy_avg_sorted,
+  n = 20,
+  fun = mean,
+  type = "around",
+  circular = TRUE,
+  na.rm = TRUE
+)
+
+### Write 30d smoothed #####
 tf <- tempfile(fileext= ".tif")
 writeRaster(
   r_smoothed,
@@ -140,7 +151,8 @@ writeRaster(
   filetype = "COG",
   gdal = c("COMPRESS=DEFLATE",
            "SPARSE_OK=YES",
-           "OVERVIEW_RESAMPLING=AVERAGE")
+           "OVERVIEW_RESAMPLING=AVERAGE"),
+  overwrite = TRUE
 )
 
 
@@ -150,9 +162,28 @@ upload_blob(
   dest = fps$FP_DOY_NO_THRESH_SMOOTHED30d
 )
 
+### Write 20d Smoothed ####
+tf <- tempfile(fileext= ".tif")
+
+writeRaster(
+  r_smoothed_20,
+  filename = tf,
+  filetype = "COG",
+  gdal = c("COMPRESS=DEFLATE",
+           "SPARSE_OK=YES",
+           "OVERVIEW_RESAMPLING=AVERAGE"),
+  overwrite = TRUE
+)
+
+upload_blob(
+  container = pc,
+  src = tf,
+  dest = fps$FP_DOY_NO_THRESH_SMOOTHED20d
+)
 
 
 
+## Threshold Smoothed 30d ####
 
 r_smoothed[r_smoothed <= SFED_THRESHOLD]<-0
 
@@ -173,6 +204,28 @@ upload_blob(
   src = tf,
   dest = fps$FP_DOY_SMOOTHED30D_THRESH_COG
   # dest = "ds-floodscan-ingest/aer_area_300s_doy_mean_thresh_gte0.01_30d_smoothed_baseline_1998_2020.tif",
+)
+## Threshold smoothed 20d ####
+
+r_smoothed20 <- rast(vp(fps$FP_DOY_NO_THRESH_SMOOTHED20d))
+r_smoothed20[r_smoothed20 <= SFED_THRESHOLD]<-0
+
+tf <- tempfile(fileext= ".tif")
+writeRaster(
+  r_smoothed20,
+  filename = tf,
+  filetype = "COG",
+  gdal = c("COMPRESS=DEFLATE",
+           "SPARSE_OK=YES",
+           "OVERVIEW_RESAMPLING=AVERAGE"),
+  overwrite = TRUE
+)
+
+
+upload_blob(
+  container = pc,
+  src = tf,
+  dest = fps$FP_DOY_SMOOTHED20D_THRESH_COG
 )
 
 
