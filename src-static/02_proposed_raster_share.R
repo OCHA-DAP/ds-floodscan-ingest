@@ -108,7 +108,7 @@ system.time(
     )
 )
 # exerimenting w/ gdalcubes
-zip_name <- glue("../{zip_date_prefix}_aer_area_300s_SFED_90d.zip")
+zip_name <- glue("{zip_date_prefix}_aer_area_300s_SFED_90d.zip")
 zip(
   zipfile = zip_name,
   files = td,
