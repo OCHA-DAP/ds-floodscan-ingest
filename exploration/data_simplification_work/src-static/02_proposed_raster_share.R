@@ -1,7 +1,6 @@
 FILE_DATE_SIMULATE <- "2024-01-15"
 NUMBER_DAYS <- 90
 
-
 box::use(terra[...])
 box::use(sf[...])
 box::use(dplyr[...])
@@ -9,9 +8,9 @@ box::use(AzureStor[...])
 box::use(stringr[...])
 box::use(lubridate[...])
 box::use(purrr[...])
-box::use(../src/utils/blob)
-box::use(paths = ../R/path_utils)
-box::use(../R/utils[download_fieldmaps_sf]) # func to get fieldaps/
+box::use(../../../src/utils/blob)
+box::use(paths = ../../../R/path_utils)
+box::use(../../../R/utils[download_fieldmaps_sf])
 box::use(glue[...])
 box::use(logger)
 
@@ -77,7 +76,9 @@ lr <- fs_spatraster(
 )
 
 td <- file.path(tempdir(),"aer_area_300s_SFED_90d")
-dir.exists(td)
+
+# for some reason w/ in map writeRaster can't write to a dir
+# that is not already actually created.
 if (!dir.exists(td)) {
   dir.create(td, recursive = TRUE)
 }
@@ -90,6 +91,7 @@ system.time(
         date_prefix = format(date, "%Y%m%d")
         cat(date_prefix,"\n")
 
+        # tempfilename
         tfn <- glue("{date_prefix}_aer_area_300s_SFED_processed.tif")
         tfp <- file.path(td, tfn)
 

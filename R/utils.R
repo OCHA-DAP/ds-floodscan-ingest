@@ -83,3 +83,9 @@ download_shapefile <- function(url, layer = NULL) {
     )
   }
 }
+
+#' @export
+extract_date <-  function(x){
+  as.Date(stringr$str_extract(x, "\\d{8}"),format = "%Y%m%d")
+}
+

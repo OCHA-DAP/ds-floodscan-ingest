@@ -10,9 +10,9 @@ box::use(lubridate[...])
 box::use(purrr[...])
 
 
-box::use(../src/utils/blob)
-box::use(paths = ../R/path_utils)
-box::reload(paths)
+box::use(../../../src/utils/blob)
+box::use(paths = ../../../R/path_utils)
+
 
 extract_date <-  function(x){
   as.Date(str_extract(x, "\\d{8}"),format = "%Y%m%d")
