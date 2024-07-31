@@ -17,6 +17,9 @@ box::use(logger)
 Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
 Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
 
+bc <- blob$load_containers()
+pc <- bc$PROJECTS_CONT
+
 # to name zipped tif
 zip_date_prefix <- format(as.Date(FILE_DATE_SIMULATE),"%Y%m%d")
 
@@ -38,7 +41,49 @@ r_historical <- rast(
   win = gdf_aoi$som_adm0
   )
 
-# Function to merge rasters fo reach day
+
+
+
+# Demo Raster -------------------------------------------------------------
+
+# Create DEMO raster w/ 365 days rather than 90 for flexible exploratory work
+r_365_sorted <- deepcopy(r_365)
+r_365_sorted <- r_365_sorted[[as.character(sort(as.Date(names(r_365_sorted))))]]
+doys_sorted_to_last_365 <- yday(as.Date(names(r_365_sorted)))
+r_historical_copy <-  deepcopy(r_historical)
+r_historical_sorted_to_365 <- r_historical_copy[[doys_sorted_to_last_365]]
+
+system.time(
+  r_anom_365 <- r_365_sorted - r_historical_sorted_to_365
+)
+FP_LAST365D_ANOM_DEMO
+
+tf <- tempfile(fileext= ".tif")
+writeRaster(
+  r_anom_365,
+  filename = tf,
+  filetype = "COG",
+  gdal = c("COMPRESS=DEFLATE",
+           "SPARSE_OK=YES",
+           "OVERVIEW_RESAMPLING=AVERAGE")
+)
+
+
+FP_LAST365D_ANOM_DEMO <- paths$load_paths(
+  virtual_path = F,
+  path_name = "FP_LAST365D_ANOM_DEMO"
+  )
+
+upload_blob(
+  container = pc,
+  src = tf,
+  dest = FP_LAST365D_ANOM_DEMO,
+)
+
+
+# 90D - 3 band raster for zipping -----------------------------------------
+
+# Function to merge rasters for each day
 fs_spatraster <- function(
   nrt_raster,
   historical_raster,

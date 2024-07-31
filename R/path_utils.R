@@ -8,7 +8,7 @@ box::use(purrr[map])
 #'     writing files to blob
 #'
 #' @export
-load_paths <-function(virtual_path = FALSE){
+load_paths <-function(virtual_path = FALSE,path_name=NULL){
   ret <- list()
   # Thresholded
   ret$FP_DOY_THRESH_COG <-  "ds-floodscan-ingest/aer_area_300s_doy_mean_thresh_gte0.01_baseline_1998_2020.tif"
@@ -31,6 +31,8 @@ load_paths <-function(virtual_path = FALSE){
 
   ret$FP_LAST90D_THRESH = "ds-floodscan-ingest/aer_area_300s_90d_sfed_example.tif"
 
+  ret$FP_LAST365D_ANOM_DEMO = "ds-floodscan-ingest/aer_area_300s_365d_sfed_anom_demo.tif"
+
   if(virtual_path){
    ret <-  map(
       ret,
@@ -40,6 +42,9 @@ load_paths <-function(virtual_path = FALSE){
     )
   }
 
+  if(!is.null(path_name)){
+    ret <- ret[[path_name]]
+  }
   ret
 
 }

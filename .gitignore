@@ -8,5 +8,10 @@
 *.tif
 *.html
 *.gif
+*.rds
 .scrap/*
+.not_published/*
 exploration/rsconnect/*
+*.env
+exploration/data_simplification_work/rsconnect/*
+exploration/data_simplification_work/qgis/*

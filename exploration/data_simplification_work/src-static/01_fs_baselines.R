@@ -9,6 +9,7 @@ box::use(stringr[...])
 box::use(lubridate[...])
 box::use(purrr[...])
 
+box::use(../../../R/utils)
 
 box::use(../../../src/utils/blob)
 box::use(paths = ../../../R/path_utils)
@@ -17,8 +18,6 @@ box::use(paths = ../../../R/path_utils)
 extract_date <-  function(x){
   as.Date(str_extract(x, "\\d{8}"),format = "%Y%m%d")
 }
-
-
 
 
 Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
@@ -33,22 +32,7 @@ bc <- blob$load_containers()
 gc <- bc$GLOBAL_CONT
 pc <- bc$PROJECTS_CONT
 
-df_urls <- list_blobs(
-  container = gc,
-  prefix= "raster/cogs/aer"
-)
-
-
-df_urls <- df_urls |>
-  mutate(
-    date= as.Date(str_extract(name, "\\d{8}"),format = "%Y%m%d"),
-    doy = yday(date),
-    urls = paste0("/vsiaz/global/",name)
-  ) |>
-  filter(
-    str_detect(urls,"\\.tif$")
-  )
-
+df_urls <- utils$floodscan_cog_meta_df(container = gc,prefix= "raster/cogs/aer")
 
 
 # this took approx an hour.
@@ -82,9 +66,6 @@ lr_doy_avg <- map(
 # merge list of rasters into 1 spatRaster
 r_doy_avg <- rast(lr_doy_avg)
 r_doy_avg_sorted <- r_doy_avg[[as.character(1:366)]]
-
-
-
 
 
 # Upload DOY unsmoothed ---------------------------------------------------
