@@ -540,4 +540,3 @@ df_zonal_anom_admin |>
   )+
   geom_line()
 ```
-
