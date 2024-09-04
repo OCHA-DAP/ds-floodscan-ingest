@@ -2,9 +2,20 @@
 .Rhistory
 .RData
 .Ruserdata
+.scrap/*
+.not_published/*
+exploration/rsconnect/*
+exploration/data_simplification_work/rsconnect/*
+exploration/data_simplification_work/qgis/*
 
 *.json
 *.zip
 *.tif
 *.html
+*.gif
+*.rds
 .scrap/*
+*.env
+*.gif
+*.rds
+

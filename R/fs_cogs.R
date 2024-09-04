@@ -1,38 +1,15 @@
-box::use(googledrive[...])
-
+box::use(stringr)
 box::use(purrr[...])
 box::use(readr[...])
 box::use(dplyr[...])
 box::use(stringr[...])
-box::use(tnc= tidync)
 box::use(terra[...])
-box::use(fs=./R/fs_to_raster)
+box::use(rlang)
 box::use(rnc= RNetCDF)
 
-# fs_base_path <- file.path(
-#   Sys.getenv("AA_DATA_DIR_NEW"),
-#   "private",
-#   "raw",
-#   "glb",
-#   "FloodScan"
-# )
-# sfed_path <-  file.path(
-#  fs_base_path,
-#  "SFED",
-#  "SFED_historical",
-#  "aer_sfed_area_300s_19980112_20231231_v05r01.nc"
-# )
-#
-# mfed_path <-  file.path(
-#  fs_base_path,
-#  "MFED",
-#  "MFED_historical",
-#  "aer_mfed_area_300s_19980112_20231231_v05r01.nc"
-# )
 
 
-
-#' Title
+#' fs_write_cog
 #'
 #' @param r
 #'
@@ -66,9 +43,6 @@ box::use(rnc= RNetCDF)
 #' }
 
 
-
-
-
 fs_write_cog <- function(r,path){
 
   date_suffix <- format(as.Date(unique(time(r))), "%Y%m%d")
@@ -89,10 +63,7 @@ fs_write_cog <- function(r,path){
 }
 
 
-
-
-
-#' Title
+#' fs_merge_sfed_mfed
 #'
 #' @param sfed_ob
 #' @param mfed_ob
@@ -106,10 +77,9 @@ fs_write_cog <- function(r,path){
 #' map(
 # c(1:100),
 # \(time_index_tmp){
-#   rtmp <- fs_merge_sfed_mfed(sfed_ob=sfed_nc,
+#   fs_merge_sfed_mfed(sfed_ob=sfed_nc,
 #                              mfed_ob=mfed_nc,
 #                              time_index=time_index_tmp)
-#   fs_write_cog(rtmp,path = "cogs")
 #
 # }
 # )
@@ -125,6 +95,8 @@ fs_merge_sfed_mfed <- function(sfed_ob=sfed_nc,
         time_index = time_index)
     }
     )
+  band_names <- stringr$str_remove(names(lr),"_AREA")
+  lr <- rlang$set_names(lr,band_names)
 
   r <- rast(lr)
   return(r)
@@ -154,7 +126,8 @@ fs_to_raster <- function(
     crs = "OGC:CRS84"
   )
   time(r) <- fs_date(time_index)
-  set.names(r, band)
+  band_name <- stringr$str_remove(band,"_AREA")
+  set.names(r, band_name)
   return(r)
 }
 
@@ -171,6 +144,7 @@ fs_get_array <- function(nc_ob, band, time_index=1){
 
 }
 
+#' @export
 fs_date <- function(time_index){
   as.Date(time_index-1, origin = "1998-01-12")
 }
@@ -185,3 +159,4 @@ fs_extent <- function(nc_ob){
           min(lat) - dy/2, max(lat) + dy/2)
   return(ex)
 }
+
