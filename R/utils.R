@@ -2,8 +2,11 @@ box::use(sf)
 box::use(glue)
 box::use(stringr)
 box::use(utils)
+box::use(lubridate)
 box::use(tools)
 box::use(purrr)
+box::use(AzureStor)
+box::use(dplyr)
 
 #' Download and load adm0 boundaries
 #'
@@ -83,3 +86,29 @@ download_shapefile <- function(url, layer = NULL) {
     )
   }
 }
+
+#' @export
+extract_date <-  function(x){
+  as.Date(stringr$str_extract(x, "\\d{8}"),format = "%Y%m%d")
+}
+
+
+#' @export
+floodscan_cog_meta_df <-  function(container = gc,prefix= "raster/cogs/aer"){
+  df_urls <- AzureStor$list_blobs(
+    container = container,
+    prefix= prefix
+  )
+
+  df_urls |>
+    dplyr$mutate(
+      date= as.Date(stringr$str_extract(name, "\\d{8}"),format = "%Y%m%d"),
+      doy = lubridate$yday(date),
+      year = lubridate$year(date),
+      urls = paste0("/vsiaz/global/",name)
+    ) |>
+    dplyr$filter(
+      stringr$str_detect(urls,"\\.tif$")
+    )
+}
+

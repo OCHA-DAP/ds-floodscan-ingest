@@ -4,20 +4,30 @@
 # ds-floodscan-ingest
 
 <!-- badges: start -->
+
+[![status:
+experimental](https://github.com/GIScience/badges/raw/master/status/experimental.svg)](https://github.com/GIScience/badges#experimental)
+[![status:
+active](https://github.com/GIScience/badges/raw/master/status/active.svg)](https://github.com/GIScience/badges#active)
+[![stable](http://badges.github.io/stability-badges/dist/stable.svg)](http://github.com/badges/stability-badges)
 <!-- badges: end -->
 
 The primary purpose of this repo is to host a pipeline to copy AER
-FloodScan data to our Azure Blob Storage.
-
-Raw data provided in 2 formats (for both SFED & MFED):
-
-1.  90d rotating zip file containing GeoTifs for 2024 onwards
-2.  a `.nc` file containing historical FloodScan data from 1998-2023
+FloodScan data to our **dev** Azure Blob Storage Account. **Note** and
+official FloodScan pipelines is under development
+[here](https://github.com/OCHA-DAP/ds-raster-pipelines/tree/main)
 
 The secondary purpose of this repo is to host some of the exploratory
 work done with FloodScan data to support conversations surrounding a
 potential public derivative product that could be one day be hosted on
 HDX.
+
+## Overview of data input:
+
+Raw data provided in 2 formats (for both SFED & MFED):
+
+1.  90d rotating zip file containing GeoTifs for 2024 onwards
+2.  a `.nc` file containing historical FloodScan data from 1998-2023
 
 # Pipelines
 
@@ -67,6 +77,17 @@ set up the following env variables in your .Renviron file
     FLOODSCAN_SFED_URL=<provided-on-request>
     FLOODSCAN_MFED_URL=<provided-on-request>
     GCP_CREDENTIALS=<provided-on-request>
+
+## Repo Structure
+
+``` shell
+├── src           # Self contained code to run GHA pipelines
+├── exploration   # Exploratory work including work exploring potential derivative public products. Not intended to be replicated at the moment.
+├── data-raw      # One-time runs to process and upload historical data to blob storage
+├── R             # custom functions sourced in `data-raw` & `exploratory` scripts
+├── .gitignore
+├── README.Rmd
+```
 
 ## Notes
 

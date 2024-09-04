@@ -1,0 +1,542 @@
+---
+title: FloodScan Data Simplification Proposal
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+    embed-resoures: true
+    smooth-scroll: true
+execute:
+  include: true
+  echo: true
+  warning: false
+  message: false
+  eval: true
+  results: "asis"
+  out.width: "100%"
+  code-fold: true
+editor: visual
+---
+
+## Overview
+
+We aim to create simplified analysis-ready version of AER FloodScan that can be shared with users on the HDX platform. The goal is to facilitate near real time monitoring and contextualization of flooding across humanitarian responses. To achieve this, we propose the following simplified data structure and file formats for sharing:
+
+1.  a 90d rotating zip file containing 90 Cloud Optimized GeoTiffs (1 per day). With the following bands: `SFED` , `SFED_ANOMALY`, and `SFED_BASELINE`
+
+Below we display the file structure and illustrate some crude, but promising ways this simplification could be easily usable for a wide user-base on HDX. For the sake of this example we simulate a file package that would have been downloaded for Somalia on the 15th of January 2024.
+
+```{r}
+
+box::use(terra[...])
+box::use(sf[...])
+box::use(tidyterra[...])
+box::use(dplyr[...])
+box::use(stringr[...])
+box::use(lubridate[...])
+box::use(purrr[...])
+box::use(ggplot2[...])
+box::use(forcats[...])
+box::use(tidyr[...])
+box::use(readr[...])
+box::use(gghdx[...])
+box::use(rnaturalearth)
+box::use(extract = exactextractr)
+box::use(AzureStor[...])
+box::use(gganimate[...])
+box::use(tmap[...])
+box::use(gganimate[...])
+box::use(zoo)
+
+box::use(paths=../../R/path_utils[load_paths,vp])
+box::use(../../R/utils) # func to get fieldaps/
+box::use(../../src/utils/blob)
+box::use(paths =../../R/path_utils)
+
+sf_use_s2(FALSE)
+
+gghdx()
+Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
+Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
+
+# averages will be calculated from historical data up to this date
+END_DATE_BASELINE <- as.Date("2020-12-31")
+SFED_THRESHOLD <- 0.01
+
+bc <- blob$load_containers()
+gc <- bc$GLOBAL_CONT
+pc <- bc$PROJECTS_CONT
+
+fps <- paths$load_paths(virtual = TRUE)
+lgdf <- utils$download_fieldmaps_sf(iso3 = "SOM", layer = c("som_adm0","som_adm1","som_adm2"))
+```
+
+## Data Structure
+
+We imagine that many users will be using a desktop GIS application and will inspect and contextualize the individual `.tif` files contained in the zip. Here is a screenshot of a QGIS environment with the AER FloodScan data loaded along with some extra contextual layers.
+
+```{r}
+#| echo: false
+knitr::include_graphics(here::here("exploration/data_simplification_work/qgis/qgis_map_example_floodscan.png"), error = FALSE)
+```
+
+To more comprehensively explain the data in this document we will load all the zip files in at once using R rather than QGIS.
+
+```{r}
+
+# utility function to extract date from file/source name.
+extract_date <-  function(x){
+  as.Date(str_extract(x, "\\d{8}"),format = "%Y%m%d")
+}
+
+ZIP_PATH <- here::here("20240115_aer_area_300s_SFED_90d.zip")
+
+# get the names of the tifs inside the zip - sort by date
+tif_files <- 
+  tibble(
+    tif_name =str_subset(unzip(ZIP_PATH,list=T)$Name,".tif$"),
+    tif_date = extract_date(tif_name)
+  ) |> 
+  arrange(tif_date)
+
+
+# format for GDAL Virtual File System (VFS)
+ZIP_VFS <- paste0("/vsizip/",ZIP_PATH,"/",tif_files$tif_name)
+
+# read in all rasters at once.
+r <- rast(ZIP_VFS)
+```
+
+We subset the `SFED_ANOM` band to get a time series of ANOMALY values
+
+```{r}
+#| code-fold: false
+
+r_anom <- r[[names(r)=="SFED_ANOM"]]
+```
+
+```{r}
+#| code-fold: false
+
+# now that we have subset to anomaly data we can rename the bands according to there
+# date for easier time-series construction/manipulation
+
+r_date <- extract_date(basename(sources(r_anom)))
+set.names(r_anom, r_date)
+```
+
+## Mapping
+
+We can then map this data at any time-step to understand where specifically flooding/flood anomalies are occurring. It is likely many users will use desktop GIS software for this. Here we show an animation of the last 90 days where each frame represents 1 day.
+
+```{r}
+# list geodataframes
+r_anom_map <- deepcopy(r_anom)
+r_anom_map[r_anom_map<=0.01] <- NA
+```
+
+```{r tmapAttempt}
+#| eval: false
+#| include: false
+#| echo: false
+
+tm_shape(
+  lgdf$som_adm1
+)+
+  tm_polygons(col="black",border.col = "white")+
+  tm_shape(
+    lgdf$som_adm0
+  ) + 
+  tm_borders(col="white",lwd= 4)+
+  tm_shape(
+    r_anom_map[[1:2]]
+  ) +
+  tm_raster(
+    palette = "viridis"
+  )+
+  tm_layout(
+    bg.color ="black"
+  ) + 
+  tm_facets()+
+  tmap_animation()
+```
+
+```{r eval =FALSE}
+
+td <- file.path(tempdir(),"maps")
+dir.create(td)
+
+names(r_anom_map) |> 
+  map(
+    \(r_name){
+      r_name = names(r_anom_map)[50]
+      ggplot()+
+        geom_sf(
+          data = lgdf$som_adm1,
+          fill = "black",
+          color = "white"
+        ) +
+        geom_sf(
+          data = lgdf$som_adm0,
+          fill = NA,
+          color = "white",linewidth =1
+        ) +
+        geom_spatraster(
+          data= r_anom_map[[r_name]],na.rm = T, interpolate = T
+        ) +
+        
+        scale_fill_viridis_c(
+          na.value = NA,
+          direction = -1,
+          breaks = c(seq(0,0.6, by =0.1),Inf)
+          ) +
+        facet_wrap(~lyr) +
+        theme(
+          panel.background = element_rect(fill = "black"),
+          plot.background  = element_rect(fill = "black"),
+          panel.grid =element_blank(),axis.line = element_blank(),
+          axis.text = element_blank(),
+          legend.title = element_blank(),
+          legend.background = element_rect(fill =NA),
+          text = element_text(color ="white"),
+          strip.background = element_rect(fill = NA),
+          strip.text = element_text(color = "white", size =24)
+        )
+      tf <- file.path(td,paste0(r_name,".png"))
+      ggsave(tf,height = 5,width = 4)
+    }
+  )
+
+gifski::gifski(
+  list.files(td,full.names = T), 
+  loop = T, 
+  delay = 0.7,
+  width = 400,
+  height = 600,
+  gif_file = "Somalia_floodscan.gif"
+  
+)
+```
+
+```{r}
+#| echo: false
+knitr::include_graphics(here::here("Somalia_floodscan.gif"), error = FALSE)
+```
+
+## Plotting
+
+While mapping is useful to understand where the events are happening it can be difficult to directly quantify. Therefore, we could imagine that creating zonal statistic time series of the simplified data sets could be useful in many contexts.
+
+Below we've taken the daily average SFED anomaly across Bay State in Somalia and created an animation where each frame represents a day. We've expanded the analysis time range here to the past 365 days to provide more context for this document, but in real-time applications users would have access to the current day and the past 90.
+
+Underneath the SFED Anomaly plot we show a theoretical example illustrating how SFED anomaly dates could be flagged according to one type of momentum indicator known as the MACD crossover. A crossover occurs when the shorter window rolling average breaches the longer window rolling average and indicates a shift in momentum. There are many interesting methods that anomaly values could be flagged and thresholded, this method is just chosen for illustration purposes.
+
+```{r}
+#| eval: true
+#| echo: false
+# just expanding hte anomaly to 365 days to get a little better glimpse of how monitoring could look over time.
+r_anom <- rast(fps$FP_LAST365D_ANOM_DEMO)
+```
+
+```{r}
+# zonal means per admin 1
+
+df_zstat_adm1 <- extract$exact_extract(
+  r_anom,
+  lgdf$som_adm1,
+  fun = "mean",
+  append_cols = c("ADM1_EN","ADM1_PCODE"),
+  progress = FALSE
+) |> 
+  pivot_longer(-starts_with("ADM")) |> 
+  separate(name, into = c("stat","date"), sep = "\\.") |> 
+  mutate(
+    date = as.Date(date)
+  )
+```
+
+```{r}
+#| eval: false
+#| echo: false
+#| include: false
+
+df_zstat_adm1 <- df_zstat_adm1 |> 
+  group_by(
+    ADM1_EN,
+    ADM1_PCODE
+  ) |> 
+  mutate(
+    # interesting that if_else won't workl
+    adm1_color = ifelse(any(value >0.03),ADM1_EN, "Other")
+  ) |> 
+  ungroup()
+
+adm1_high <- df_zstat_adm1 |> 
+  filter(adm1_color!="Other") |> 
+  distinct(ADM1_EN) |> 
+  pull(ADM1_EN)
+
+pal_adm1_high <- RColorBrewer::brewer.pal(n= length(adm1_high)  ,name= "Set1") |> 
+  set_names(
+    adm1_high
+  )
+pal_adm1_complete<- c(pal_adm1_high, 'Other' = "grey")
+alpha_adm1_complete <-  c(rep(0.5, length(pal_adm1_high)),0.02)
+
+df_zstat_adm1 |> 
+  ggplot(
+    aes(x= date, y= value, group= ADM1_EN, color = adm1_color,alpha = adm1_color)
+  )+
+  scale_color_manual(
+    values = pal_adm1_complete
+  )+
+  scale_alpha_manual(
+    values = alpha_adm1_complete
+  )+
+  geom_line()
+```
+
+```{r MACD}
+
+# calculate rolling averages at 2 window lengths
+df_zstats_bay <- df_zstat_adm1 |> 
+  filter(
+    ADM1_EN == "Bay"
+  ) |> 
+  mutate(
+    win_small = zoo$rollmean(value, k = 7, fill = NA),
+    win_long = zoo$rollmean(value, k = 21, fill = NA)
+  ) |> 
+  pivot_longer(
+    c("value","win_small","win_long"),
+    names_to = "window",
+    values_to = "value"
+  ) |> 
+  mutate(
+    facet_group = fct_relevel(if_else(window != "value","Momentum Indicators","SFED Anomaly"),"SFED Anomaly","Momentum Indicators")
+  )
+
+# identify crossover dates
+df_crossover <- df_zstats_bay |> 
+  pivot_wider(id_cols =  -facet_group,
+              names_from = window, 
+              values_from = value
+  ) |> 
+  
+  #. get crossover dates
+  mutate(
+    small_window_increasing = win_small > lag(win_small),
+    value_gt_anom_thresh = zoo$rollmax(value, k = 4, fill = NA)> 0.005,
+    small_window_below_yesterday = lag(win_small) < lag(win_long),
+    small_window_above_today = win_small >= win_long,
+    crossover = value_gt_anom_thresh  & small_window_increasing & small_window_below_yesterday & win_small >= win_long
+  ) |>
+  filter(crossover)
+
+df_crossover_long <- df_crossover |> 
+  select(
+    ADM1_EN:win_long
+  ) |> 
+  pivot_longer(
+    value:win_long
+  ) |> 
+  mutate(
+    facet_group = fct_relevel(if_else(name != "value","Momentum Indicators","SFED Anomaly"),"Momentum Indicators","SFED Anomaly")
+  )
+
+
+#. create time series animation
+p_anim <- df_zstats_bay |> 
+  ggplot(
+    aes(x = date,
+        y= value,
+        color = window ,
+        group=window)
+  )+
+  geom_line(
+    linewidth = 1)+
+  scale_color_manual(
+    values = c(
+      "value" = hdx_hex("mint-hdx"),
+      "win_long" = hdx_hex("sapphire-hdx"),
+      "win_small" = hdx_hex("tomato-light")
+    ),labels = c("SFED", "21-day window","7-day window")
+  )+
+  facet_wrap(
+    ~facet_group,nrow = 2
+  ) +
+  transition_reveal(date)+
+  labs(
+    title = "AER FloodScan SFED Anomaly Values",
+    subtitle = "Bay State Somalia"
+  )
+
+p_anim
+```
+
+The below plot shows the same data in the animation above, but with crossover dates indicated.
+
+```{r}
+p <- df_zstats_bay |> 
+  ggplot(
+  )+
+  geom_line(
+    aes(x = date,
+        y= value,
+        color = window ,
+        group=window),
+    linewidth = 1)+
+  geom_vline(
+    data = df_crossover_long ,
+    aes(
+      xintercept = date
+    ),color = hdx_hex("tomato-dark"), 
+    linetype = "dashed"
+  )+
+  scale_color_manual(
+    values = c(
+      "value" = hdx_hex("mint-hdx"),
+      "win_long" = hdx_hex("sapphire-hdx"),
+      "win_small" = hdx_hex("tomato-light")
+    ),
+    labels = c("SFED", "21-day window","7-day window")
+  )+
+  geom_text(
+    data=df_crossover_long |> 
+      filter(facet_group =="SFED Anomaly"),
+    aes(x= date-5, y= 0.06,label = format(date,"%d-%b" )),angle = 90
+  )+
+  scale_y_continuous(
+    limits = c(-.005,0.075)
+  )+
+  facet_wrap(
+    ~facet_group,
+    nrow = 2
+  )+
+  labs(
+    title = "AER FloodScan SFED Anomaly Values",
+    subtitle = "Bay State Somalia"
+  )
+p
+
+```
+
+```{r returnPeriod}
+#| eval: false
+#| include: false
+#| echo: false
+
+r_sfed <- r[[names(r)=="SFED"]]
+
+
+```
+
+```{r}
+#| eval: false
+#| include: false
+p <- df_zstats_bay |> 
+  ggplot(
+    aes(x = date,
+        y= value,
+        color = window ,
+        group=window)
+  )+
+  geom_point()+
+  geom_line(aes(alpha = window))+
+  transition_time(date) +
+  enter_fade() +
+  exit_fade()
+# ggiraph$geom_point_interactive(
+#   aes(
+#     tooltip = glue::glue("val: {value}
+#                          date: {date}"
+#     )
+#   )
+#   )+
+geom_vline(
+  data = df_crossover_long |> 
+    rename(date1 = date),
+  aes(
+    # x=  date, y= value, 
+    # group = paste0(name,"2"),
+    # color =name
+    xintercept = date1
+  )
+)+
+  # transitio
+  scale_alpha_manual(
+    values = c(
+      "value" = 1,"win_small"=1,"win_long" =1)
+  )+
+  facet_wrap(~facet_group,nrow = 2)+
+  transition_reveal(date,keep_last = F) +
+  ease_aes("linear")+
+  shadow_mark()
+animate(p,fps = 5)
+# ggiraph$girafe(ggobj = p)
+```
+
+```{r}
+#| eval: false
+#| include: false
+
+# experiment that proves if we were to take SFED zonal mean each day for each
+# strata and then calculate anom based on that it would be exactly the same!
+# a bit counter-intuitive, but its right!
+# zonal stats performed in data-raw/df_aer_sfed_som_adm1_zstats.R
+
+box::use(arrow)
+
+tf <- tempfile(fileext = ".parquet")
+download_blob(
+  container = pc, 
+  src = "ds-floodscan-ingest/df_aer_sfed_som_adm1_zstats.parquet",
+  dest = tf,
+  overwrite =T
+)
+
+df_zonal <- arrow$read_parquet(tf)
+
+df_zonal_base <- df_zonal |> 
+  filter(date<= as.Date("2020-12-31")) |>
+  group_by(
+    ADM1_EN,ADM1_PCODE, doy = yday(date)
+  ) |> 
+  summarise(
+    mean = mean(value,na.rm = T)
+  ) |> 
+  mutate(
+    roll20 = zoo$rollmean(
+      mean,
+      k= 20 ,
+      align = "center", 
+      # to bad zoo doesn't have a `ciruclar` arg like terra
+      # but thats okay we can look at the non-NA vals for this experiment
+      fill = NA 
+    )
+  )
+
+df_zonal_anom_admin <- df_zonal |> 
+  filter(
+    date <= as.Date("2024-01-15"),
+    date >= as.Date("2024-01-15")-89
+  ) |> 
+  mutate(
+    doy = yday(date)
+  ) |> 
+  left_join(
+    df_zonal_base,
+    by = c("ADM1_EN","ADM1_PCODE","doy")
+  ) |> 
+  mutate(
+    anom = value - roll20
+  )
+
+df_zonal_anom_admin |> 
+  ggplot(
+    aes(x= date, y= anom, group= ADM1_EN, color = ADM1_EN)
+  )+
+  geom_line()
+```
