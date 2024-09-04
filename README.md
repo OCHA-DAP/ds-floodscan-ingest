@@ -14,6 +14,13 @@ Raw data provided in 2 formats (for both SFED & MFED):
 1.  90d rotating zip file containing GeoTifs for 2024 onwards
 2.  a `.nc` file containing historical FloodScan data from 1998-2023
 
+The secondary purpose of this repo is to host some of the exploratory
+work done with FloodScan data to support conversations surrounding a
+potential public derivative product that could be one day be hosted on
+HDX.
+
+# Pipelines
+
 ## GitHub Action (continuous)
 
 The automated pipeline was set up in 2 phases using GitHub Actions
@@ -46,5 +53,29 @@ folder:
   MFED) and uploads to blob.
 - `data-raw/floodscan_cogs_recent.R` -\> As the `.nc` files do not
   contain data for 2024, this script processes the geotifs obtained in
-  teh 90d rotating zip files (pipeline phase 1) to create & upload COGS
+  the 90d rotating zip files (pipeline phase 1) to create & upload COGS
   in the same format.
+
+# Developer Instructions
+
+## Env variables
+
+set up the following env variables in your .Renviron file
+
+    DSCI_AZ_SAS_DEV=<provided-on-request>
+    DSCI_AZ_ENDPOINT=<provided-on-request>
+    FLOODSCAN_SFED_URL=<provided-on-request>
+    FLOODSCAN_MFED_URL=<provided-on-request>
+    GCP_CREDENTIALS=<provided-on-request>
+
+## Notes
+
+- When formalizing this pipeline there is no need to use the **phase 1**
+  gdrive pipeline code since we are no longer storing data there.
+- Team has noted that band order (SFED/MFED) is not 100% consistent.
+  This was just an oversight in the code where the files were iterated
+  differently in the historical vs daily (NRT) pipelines. Therefore,
+  when using the data it is best to refer to bands by there name rather
+  than index. This should be fixed when formalizing the pipeline.
+- **Upon completion of formal pipeline** - notify author of this repo
+  and we will archive the GitHub Actions and cogs on dev blob.

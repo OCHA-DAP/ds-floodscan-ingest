@@ -3,9 +3,14 @@
 .RData
 .Ruserdata
 .scrap/*
+.not_published/*
 
 *.json
 *.zip
 *.tif
 *.html
 .scrap/*
+*.env
+*.gif
+*.rds
+exploration/rsconnect/*
