@@ -163,11 +163,7 @@ We will set the key parameters:
 - Baseline years: last 10 years (2014:2023)
 - Number of tifs to produce: 90
 
-We create a 365 band raster where each bands pixel values represent the average value for that pixel for that day of the year. We do this across all years in reference baseline. [Code Here](). Once the output of that is saved we can easily load it and play with different smoothing factors
-
-
-
-
+We create a 365 band raster where each bands pixel values represent the average value for that pixel for that day of the year. We do this across all years in reference baseline: [exploration/data_simplification_work/src-static/01b_fs_baselines_last_10_yr.R](https://github.com/OCHA-DAP/ds-floodscan-ingest/blob/hdx-rp-baseline/exploration/data_simplification_work/src-static/01b_fs_baselines_last_10_yr.R). Once the output of that is saved we can easily load it and play with different smoothing factors
 
 ```{r}
 #|eval: false
