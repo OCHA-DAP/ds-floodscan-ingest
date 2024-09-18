@@ -1,0 +1,232 @@
+---
+title: "Flood Databse"
+format: html
+editor: visual
+---
+
+## Intro
+
+Code to calculate pixel-level baselines.
+```{r}
+box::use(dplyr[...])
+box::use(lubridate[...])
+box::use(purrr[...])
+box::use(sf[...])
+box::use(terra[...])
+box::use(stringr[...])
+
+# box::use(
+#   AzureStor,
+#   arrow
+# )
+box::use(paths = .. / R / path_utils)
+box::use(.. / src / utils / blob)
+box::use(../R/utils) #
+
+Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
+Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
+
+fps <- paths$load_paths()
+
+
+
+
+```
+
+Below is code to connect to the Azure Blob that contains the processed FloodScan COGs. Once the COGs are on the `prod` branch you will need to adjust these connectors
+```{r}
+bc <- blob$load_containers()
+gc <- bc$GLOBAL_CONT
+
+df_cog_contents <- AzureStor::list_blobs(
+  container = gc,
+  prefix = "raster/cogs/aer_area_300s"
+)
+```
+
+We create a metadata data.frame catalog from the list of COGS
+- the vp allows us to easily read the file directly
+- the date column allows us to query subset the required files.
+
+
+Due to slow loading COG data sets (due to metadata), it would follow that we should only query/load the COG rasters required each day which will be a small fraction of the historical data.
+```{r}
+df_cog_contents <- df_cog_contents |>
+  dplyr::mutate(
+    date = utils$extract_date(name),
+    # day of year (doy)
+    doy = lubridate::yday(date),
+    vp = paste0("/vsiaz/global/",name)
+  ) |>
+  dplyr::filter(
+    str_detect(string = name,pattern = ".tif$")
+  )
+```
+
+# Baseline Calculations
+
+## Reference period
+
+Two basic options have been proposed for the 
+
+1. Last 10 years - keep this updated
+2. A fixed reference period, for example: 1998-20XX or 1998-current
+
+## Smoothing factor
+
+For the reference period we would calculate the average SFED value across each day-of-year (doy) at the pixel level. To remove potential daily variance from the baseline doy average we should then smooth this value by some factor (number of  days). It makes sense to smooth this value, by a `centered` rolling mean. We choose centered instead of "left" or "right" so that baseline average will integrate both past and future values.
+
+
+The fixed reference period is vastly simpler as we can do a 1 time calculation across reference years to create a single raster that can be re-applied. For the rolling baseline calculation we need to calculate this raster every year.
+
+```{r}
+box::reload(paths)
+fp_doy_avg_last_10 <- paths$load_paths("FP_DOY_LAST_2014_2023",virtual_path =T)
+fvps <- paths$load_paths(virtual_path =T)
+
+r_baseline_10 <- rast(fp_doy_avg_last_10)
+
+lck <- AzureStor$list_blobs(
+  container = pc,
+  prefix = "ds-floodscan-ingest/aer_area_300s_doy_mean_baseline_2014"
+)
+
+AzureStor$download_blob(
+  container = pc, 
+  src = "ds-floodscan-ingest/aer_area_300s_doy_mean_baseline_2014_2023.tif",
+  dest = td <- tempfile(fileext= ".tif")
+)
+r_baseline_10<- rast(td)
+
+
+```
+
+
+## Appendix
+```{r}
+
+#|eval: false
+
+#' cog_pub_dates
+#'
+#' @param pub_date 
+#' @param num_tifs 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+#' cog_pub_dates(pub_date = "2024-09-15", num_tifs = 90)
+
+cog_pub_dates <- function(pub_date,num_tifs){
+  seq(pub_date-(num_tifs-1), pub_date, by = "day")
+}
+
+
+#' @title get_baseline_dates
+#' @param pub_date 
+#' @param num_tifs 
+#' @param n_smooth 
+#' @param baseline_years 
+#' @examples
+#' l_dates_baseline <- get_baseline_dates(
+#'   pub_date = recent_date,
+#'   num_tifs = 90,
+#'   n_smooth= 10,
+#'   baseline_years = 2014:2024
+#' )
+
+get_baseline_dates <- function(
+    pub_date, 
+    num_tifs = 90,
+    n_smooth = 10 ,
+    baseline_years= 2014:2024
+){
+  
+  set_names(baseline_years,baseline_years) |> 
+    map(
+      \(byear){
+        yr_diff <- year(pub_date) - byear
+        date_last_tif <- pub_date - years(yr_diff)
+        date_first_tif <- date_last_tif - num_tifs
+        seq(date_first_tif - days(n_smooth/2) , date_last_tif+ days(n_smooth/2), by ="day")
+      }
+    )
+}
+```
+
+Let's simulate the production of the latest COG data set.
+
+We will set the key parameters:
+
+- Baseline average smoothing: 10 days
+- Baseline years: last 10 years (2014:2023)
+- Number of tifs to produce: 90
+
+We create a 365 band raster where each bands pixel values represent the average value for that pixel for that day of the year. We do this across all years in reference baseline. [Code Here](). Once the output of that is saved we can easily load it and play with different smoothing factors
+
+
+
+
+
+```{r}
+#|eval: false
+#|
+recent_date <- max(df_cog_contents$date)
+num_days_publish <- 90
+smoothing_factor <- 10
+# let's do baseline of last 10 years
+baseline <- (year(recent_date)-10) : (year(recent_date)-1)
+
+
+first_date <- recent_date - num_days_publish-1 - (smoothing_factor/2)
+last_date <- recent_date + (smoothing_factor/2)
+
+seq( first_date,last_date, by ="day") |> 
+  map(
+    \(d){
+      doy <- yday(d)
+      
+    }
+  )
+
+
+
+
+df_cog_contents |> 
+  filter(
+    year(date) %in% baseline
+  )
+
+l_dates_baseline <- get_baseline_dates(
+  pub_date = recent_date,
+  num_tifs = 90,
+  n_smooth= 10,
+  baseline_years = baseline
+  )
+
+lr <- l_dates_baseline |> 
+  imap(
+    \(date_seq,yr){
+      cat(yr,"\n")
+    
+      df_cog_contents_filt <- df_cog_contents |>
+        filter(
+          date %in% date_seq
+        )
+      rast(df_cog_contents_filt$vp)
+    }
+  )
+
+lr_samp <- lr[1:2]
+number_layers <- lr |> 
+  map(
+    \(r){
+      r_sfed <- r[[names(r)=="SFED"]]
+      nlyr(r_sfed)
+    }
+  ) |> 
+  list_c() |> 
+  unique()
+
+```

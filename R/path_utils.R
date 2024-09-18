@@ -25,6 +25,8 @@ load_paths <-function(virtual_path = FALSE,path_name=NULL){
 
   ret$FP_DOY_NO_THRESH_SMOOTHED20d <- "ds-floodscan-ingest/aer_area_300s_doy_no_thresh_20d_smoothed_baseline_1998_2020.tif"
 
+  ret$FP_DOY_LAST_2014_2023 <- "ds-floodscan-ingest/aer_area_300s_doy_mean_baseline_2014_2023.tif"
+
   ret$FP_LAST365D = "ds-floodscan-ingest/aer_area_300s_last_365d.tif"
 
   ret$FP_LAST365D_THRESH = "ds-floodscan-ingest/aer_area_300s_last_365d_sfed_gte0.01.tif"
@@ -32,6 +34,10 @@ load_paths <-function(virtual_path = FALSE,path_name=NULL){
   ret$FP_LAST90D_THRESH = "ds-floodscan-ingest/aer_area_300s_90d_sfed_example.tif"
 
   ret$FP_LAST365D_ANOM_DEMO = "ds-floodscan-ingest/aer_area_300s_365d_sfed_anom_demo.tif"
+
+  ret$FP_SFED_SOM_ADM1 ="ds-floodscan-ingest/df_aer_sfed_som_adm1_zstats.parquet"
+
+  ret$FP_GLOBAL_FLOODS_DB = "ds-floodscan-ingest/gfd_event_stats_20215_13_error_fixed_2.csv"
 
   if(virtual_path){
     ret <-  map(
