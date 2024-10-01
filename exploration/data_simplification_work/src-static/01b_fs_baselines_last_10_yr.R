@@ -85,5 +85,5 @@ writeRaster(
 upload_blob(
   container = pc,
   src = tf,
-  dest = glue$glue("ds-floodscan-ingest/aer_area_300s_doy_mean_baseline_{min(BASELINE_YEARS)}_{max(BASELINE_YEARS)}.tif"),
+  dest = fps$FP_DOY_LAST_2014_2023,
 )
