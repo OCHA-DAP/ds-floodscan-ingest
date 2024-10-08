@@ -1,0 +1,859 @@
+---
+title: "FloodScan & Global Flood Database"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    self-contained: true
+    embed-resoures: true
+    smooth-scroll: true
+execute:
+  include: true
+  echo: false
+  warning: false
+  message: false
+  eval: false
+  results: "asis"
+  out.width: "100%"
+  code-fold: false
+editor: visual
+---
+
+**WIP**
+
+# Intro
+
+TBD
+
+# DB Overview
+
+[Global Flood Databse](https://global-flood-database.cloudtostreet.ai/) created by Dartmouth Flood Observatory, Cloud to Street with funding and support from Google Earth Engine.
+
+```{r}
+#| eval: true
+
+box::use(
+  dplyr[...],
+  ggplot2[...],
+  lubridate[...],
+  purrr[...],
+  reactable[...],
+  tidyr[...],
+  terra[...],
+  stringr[...],
+  janitor[clean_names],
+  AzureStor,
+  arrow,
+  glue,
+  gghdx,
+  leaflet,
+  countrycode,
+  sf,
+  patchwork,
+  readr,
+  rne = rnaturalearth,
+  ggiraph,
+  scales,
+  htmltools
+)
+gghdx$gghdx()
+sf$sf_use_s2(use_s2 =F)
+
+
+box::use(paths = .. / R / path_utils)
+box::use(.. / src / utils / blob)
+box::use(../R/utils) #
+
+Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
+Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
+fp_floods_db <- paths$load_paths(path_name = "FP_GLOBAL_FLOODS_DB", virtual_path = F)
+
+
+fps <- paths$load_paths()
+
+bc <- blob$load_containers()
+gc <- bc$GLOBAL_CONT
+pc <- bc$PROJECTS_CONT
+
+AzureStor$download_blob(
+  container = pc,
+  src = fps$FP_GLOBAL_FLOODS_DB,
+  dest = tf <- tempfile(fileext = ".csv"),
+  overwrite = T
+)
+df_floods_db <- readr$read_csv(tf) |>
+  clean_names() |> 
+  mutate(
+        start_date = mdy(dfo_began),
+    end_date = mdy(dfo_ended)
+  )
+
+
+
+gdf_floods <- sf$st_as_sf(
+  df_floods_db,
+  coords= c("dfo_centroid_x","dfo_centroid_y"),
+  crs= 4326
+)
+
+
+AzureStor$download_blob(
+  container = pc,
+  src = fps$FP_GLOBAL_FLOODS_EXTRACTED,
+  dest = tf <- tempfile(fileext = ".csv"),
+  overwrite = T
+)
+
+floods_extracted <- arrow$read_parquet(tf) |>
+  clean_names()
+```
+
+```{r}
+# exploratory
+ggplot(
+  df_floods_db
+)+ 
+  geom_point(
+    aes(x=dfo_displaced,gfd_exp_ghsl_2015)
+  )
+```
+
+
+## Map
+
+Here we see the locations & selected metadata for all **913** events in the database.
+```{r}
+#| eval: true
+
+leaflet$leaflet() |> 
+  leaflet$addTiles() |>
+  leaflet$addMarkers(
+    data= gdf_floods,
+    label = ~glue$glue(
+      "<b>Country:</b> {dfo_country}
+      <br><b>Date:</b> {start_date} to {end_date}
+      <br><b>Displaced:</b> {dfo_displaced}
+      <br><b>Deaths:</b> {dfo_dead}
+      <br><b>Validated by:</b> {dfo_validation}
+      ") |> 
+      map(htmltools$HTML)
+  )
+```
+
+
+## Africa Summaries
+
+Hover over points on plot for more information on specific events.
+
+```{r}
+#| eval: true
+
+gdf_adm0_africa <- rne$ne_countries(type ="countries",
+                                   continent = "Africa") |> 
+  sf$st_make_valid() 
+  
+
+gdf_africa_continent <- gdf_adm0_africa |> 
+  summarise(
+    do_union =TRUE
+  )
+
+gdf_floods_afr <- gdf_floods[gdf_africa_continent,]
+
+
+floods_afr_simp <- gdf_floods_afr |> 
+    mutate(
+    id = row_number(),
+    start_date = mdy(dfo_began),
+    end_date = mdy(dfo_ended),
+    .before = everything()
+  ) |> 
+  select(
+    id,
+    system_index,
+    dfo_country,
+    start_date,
+    end_date,
+    dfo_cause,
+    dfo_dead,
+    dfo_displaced,
+    gfd_exp_ghsl_2015
+  ) |> 
+  sf$st_join(
+    gdf_adm0_africa |>
+      select(admin0_ne = admin)
+  ) |> 
+  mutate(
+          unhcr_region = countrycode$countrycode(
+      sourcevar = admin0_ne, 
+      origin = "country.name", 
+      destination = "unhcr.region"),
+
+  )
+```
+
+```{r}
+#| eval: true
+
+df_floods_afr <- floods_afr_simp |> 
+  sf$st_drop_geometry() 
+
+df_floods_yearly <- df_floods_afr |> 
+  group_by(
+    yr_date = floor_date(start_date, "year"), 
+    unhcr_region,
+    admin0_ne
+    ) |>
+  summarise(
+    across(c(
+      "dfo_dead",
+      "dfo_displaced",
+      "gfd_exp_ghsl_2015"),\(x)sum(x,na.rm = T)),
+    num_events = n(),
+    .groups = "drop"
+  )
+
+
+p_yearly_dispacement_summary <- df_floods_yearly |> 
+  ggplot(
+    aes(x = yr_date, 
+        y =dfo_displaced,
+        group = admin0_ne,
+        color =admin0_ne)
+  )+
+  ggiraph$geom_point_interactive(
+    aes(tooltip = glue$glue(
+    "Year: {year(yr_date)}
+    Country: {admin0_ne}
+    Total Displaced: {scales$comma(dfo_displaced)}
+    Total Deaths: {dfo_dead}
+    Floods reported: {num_events}")),
+  )+
+  geom_line()+
+  facet_wrap(~unhcr_region)+
+  scale_y_continuous(
+    labels = scales$label_comma()
+  )+
+  scale_color_viridis_d()+
+  labs(
+    title = "Flood Displacement Across Africa by Event",
+    subtitle= "Global Flood Database 2000-2018",
+    caption = "Source: Dartmouth + Cloud to Street",
+    y= "Population Displaced",
+  )+
+  # scale_color_brewer(type = "qual")+
+  theme(
+    legend.position = "none",
+    axis.title.x = element_blank()
+  )
+
+ggiraph$girafe(ggobj= p_yearly_dispacement_summary)
+```
+
+
+```{r}
+p_yearly_exposed_summary <- df_floods_yearly |> 
+  ggplot(
+    aes(x = yr_date, 
+        y =gfd_exp_ghsl_2015,
+        group = admin0_ne,
+        color =admin0_ne)
+  )+
+  ggiraph$geom_point_interactive(
+    aes(tooltip = glue$glue(
+    "Year: {year(yr_date)}
+    Country: {admin0_ne}
+    Total Displaced: {scales$comma(dfo_displaced)}
+    Total Deaths: {dfo_dead}
+    Total Exposed: {gfd_exp_ghsl_2015}
+    Floods reported: {num_events}")),
+  )+
+  geom_line()+
+  facet_wrap(~unhcr_region)+
+  scale_y_continuous(
+    labels = scales$label_comma()
+  )+
+  scale_color_viridis_d()+
+  labs(
+    title = "Flood Displacement Across Africa by Event",
+    subtitle= "Global Flood Database 2000-2018",
+    caption = "Source: Dartmouth + Cloud to Street",
+    y= "Population Displaced",
+  )+
+  # scale_color_brewer(type = "qual")+
+  theme(
+    legend.position = "none",
+    axis.title.x = element_blank()
+  )
+ggiraph$girafe(ggobj= p_yearly_exposed_summary)
+
+```
+
+
+```{r}
+df_floods_afr |> 
+  filter(admin0_ne == "Somalia")
+```
+
+
+```{r}
+ck <- df_floods_afr |> 
+  group_by(
+    unhcr_region
+  ) |> 
+  summarise(
+    m = list(lm(dfo_displaced~gfd_exp_ghsl_2015)),
+    
+  ) 
+
+m <- lm(
+  sqrt(dfo_displaced)~sqrt(gfd_exp_ghsl_2015),df_floods_afr |> 
+    filter(unhcr_region == "East and Horn of Africa")
+  )
+summary(m)
+broom::tidy(m)
+
+  ck |> 
+    group_by(
+      unhcr_region
+    ) |>
+    mutate(
+    tm = list(map(m,\(x) broom::tidy(x)))
+  ) |> 
+    unnest(tm) |> 
+    unnest(tm) |> 
+    filter(
+      str_detect(term,"gfd")
+    )
+
+```
+
+## Charter
+https://disasterscharter.org/web/guest/charter-activations?from=01+01+2000&to=25+09+2024&disaster=floods
+```{r}
+box::use(rvest[...])
+
+library(wdman)
+library(RSelenium)
+
+selServ <- selenium(
+  port = 4444L,
+  version = 'latest',
+  # chromever = '103.0.5060.134', # set to available
+  chromever = "106.0.5249.21"
+)
+
+remDr <- remoteDriver(
+  remoteServerAddr = 'localhost',
+  port = 4444L,
+  browserName = 'chrome'
+)
+shell('docker run -d -p 4446:4444 selenium/standalone-firefox')
+
+remDr[["client"]]
+url_charter_floods <-  "https://disasterscharter.org/web/guest/charter-activations?from=01+01+2000&to=25+09+2024&disaster=floods"
+
+RSelenium::rsDriver()
+
+# Start Selenium server and browser
+
+binman::list_versions(appname = "chromedriver")
+rD <- rsDriver(
+  browser = "firefox",
+  port = 4445L,  # Default port used by RSelenium
+  verbose = FALSE
+)
+
+RSelenium::sta
+
+rD <- RSelenium::rsDriver(
+  # port = 4567L,
+  browser = "chrome",drive
+  chromever = "129.0.6668.59",
+  # chromever="105.0.5195.19"
+  # chromever="105.0.5195.52"
+  )
+# Assign the client to an object
+remDr <- rD[["client"]]
+rD <- RSelenium::rsDriver(...)
+
+# Specify the URL of the page containing the table
+
+
+
+# Read the HTML content of the page
+
+webpage <- read_html(url_charter_floods)
+
+webpage %>%
+  # html_text()
+  html_nodes(".timeline") 
+  # html_element(".timeline") |> 
+  # html_nodes()
+
+webpage %>%
+  html_nodes(".timeline .mounth")
+
+
+
+
+webpage |> 
+  html_element()
+webpage 
+  html_node("div.activations")
+webpage %>%
+  # html_text()
+  html_nodes(".timeline .mounth") 
+  html_table()
+webpage |> 
+  # html_elements("script")
+  html_elements(".activations-column")
+	html_attr("href")
+  html_elements("p")
+# Extract the table (assuming it's the first table on the page)
+table <- webpage %>%
+  html_node("table") %>%  # This grabs the first <table> element
+  html_table()
+
+# Convert to a data frame
+df <- as.data.frame(table)
+
+# Display the scraped table
+print(df)
+```
+
+
+# FloodScan + DB
+
+TBD
+
+
+```{r}
+
+flood_values_long <- floods_extracted |> 
+  pivot_longer(
+    cols = starts_with("x"),names_to = "date_floodscan", values_to = "SFED"
+  ) |> 
+  mutate(
+    date_floodscan = as_date(str_remove(date_floodscan,"x"),format = "%Y_%m_%d")
+  )
+
+
+event_dates_by_id<- floods_afr_simp |> 
+  sf$st_drop_geometry() |>
+  group_by(
+    id
+  ) |> 
+  summarise(
+    event_dates = list(seq(start_date, end_date, by="day"))
+  ) |> 
+  unnest(event_dates) |> 
+  mutate(
+    event = T
+  )
+
+df_floods_joined <- flood_values_long |> 
+  left_join(
+    event_dates_by_id, by = c("id", "date_floodscan" = "event_dates")
+  ) |> 
+  left_join(
+    floods_afr_simp |> 
+      sf$st_drop_geometry()
+  ) |> 
+  mutate(
+    event = replace_na(event,FALSE)
+  ) 
+
+
+
+pck <- df_floods_joined |> 
+  filter(admin0_ne=="Somalia") |>
+  group_by(
+    date_floodscan
+  ) |>
+  summarise(
+    event = any(event),
+    SFED = max(SFED,na.rm=T)
+  ) |> 
+  filter(
+    year(date_floodscan) >2010, year(date_floodscan)<=2018
+  ) |> 
+
+  # distinct(date_floodscan,id)
+  ggplot(aes(x= date_floodscan, y= SFED, color =event))+
+  geom_point_interactive(aes(tooltip = glue$glue(
+    "Date: {date_floodscan}
+    SFED: {SFED}")))
+girafe(ggobj = pck)
+
+df_floods_joined |> 
+  ggplot(
+    aes(
+      x = date_floodscan,
+      y = SFED,
+      color = event,
+      group = id
+      )
+  )+
+  facet_wrap(~admin0_ne)+
+  geom_line()+
+  geom_point()
+
+df_floods_joined |> 
+  ggplot(
+    aes(
+      x = event,
+      y = SFED,
+      fill = event,
+      )
+  )+
+  geom_boxplot()+
+  facet_wrap(~admin0_ne)
+
+
+m1 <- glm(
+  formula = event ~ SFED + dfo_country,
+  family = binomial(link = "logit"),
+  data = df_floods_joined
+  )
+summary(m1)
+
+glm_possible <- possibly(glm, otherwise = NA)
+df_country_models <- df_floods_joined |> 
+  group_by(
+    dfo_country
+  ) |> 
+  summarise(
+    m = list(
+      glm_possible(event~SFED, family = binomial(link = "logit"))
+    )
+  )
+
+df_floods_joined |> 
+  split(df_floods_joined$dfo_country) |> 
+  map(\(dft){
+    dft |> 
+      filter(
+        event
+      ) |> 
+      distinct(id)
+  }
+  )
+
+# install.packages("easystats")
+broom::tidy(m1)
+broom::tidy(m1,exp =TRUE)
+broom::glance(m1)
+plot(m1)
+summary(df_country_models$m[[1]])
+
+
+
+
+
+
+
+# what format is 1998_01_20 in? %Y_%m_%d?
+
+leaflet(gdf_floods_afr) |> 
+  addTiles() |> 
+  addMarkers()
+
+leaflet(gdf_subset_buffer) |> 
+  addTiles() |> 
+  addPolygons()
+
+gdf_floods_afr <- gdf_floods_afr |> 
+  mutate(
+    start_date = mdy(dfo_began),
+    end_date = mdy(dfo_ended),
+    .before = everything()
+  ) |> 
+  arrange(
+    start_date
+  )
+
+
+
+```
+
+
+```{r}
+
+
+df_floods_afr |> 
+  ggplot(
+    aes(
+      x= start_date,
+      y= dfo_dead,
+      group = dfo_country,
+      color = dfo_country
+    )
+  )+
+  geom_point()+
+  geom_line()
+
+library(ggiraph)
+
+p_displaced <- floods_afr_simp |> 
+  sf$st_drop_geometry() |> 
+  ggplot(
+    aes(
+      x= start_date,
+      y= dfo_displaced,
+      group = admin0_ne,
+      color = admin0_ne
+    )
+  )+
+  geom_point_interactive(
+    aes(tooltip = glue$glue("{dfo_country}")),
+    alpha=0.5
+    
+    )+
+  geom_line(alpha=0.5)+
+  scale_y_continuous(
+    labels = scales::label_number()
+  )
+  
+girafe(ggobj = p_displaced)
+
+```
+
+```{r}
+df_cog_contents <- AzureStor::list_blobs(
+  container = gc,
+  prefix = "raster/cogs/aer_area_300s"
+)
+
+
+df_cog_contents <- df_cog_contents |>
+  dplyr::mutate(
+    date = utils$extract_date(name),
+    vp = paste0("/vsiaz/global/",name)
+  ) |>
+  dplyr::filter(
+    str_detect(string = name,pattern = ".tif$")
+  )
+df_cog_contents |> 
+  glimpse()
+
+
+
+gdf_samp <- gdf_floods_afr |> 
+  slice(1:10)
+
+df <- data.frame(
+  fruit = c("melon", "grapes", "coconut"),
+  price = c(3L, 5L, 2L)
+)
+m <- mirai_map(df, sprintf, .args = list(fmt = "%s: $%d"))
+
+
+terra::extract()
+
+
+for(row in 1:nrow(gdf_samp)){
+  row = 1
+  gdf_subset <- gdf_samp[row,]
+  date_query  <- seq(gdf_subset$start_date, gdf_subset$end_date,by ="day")
+  # print(date_query)
+  r_catalogue <- df_cog_contents |> 
+    filter(
+      date %in% date_query
+    )
+  r <- rast(r_catalogue$vp,win = gdf_subset) 
+  r_sfed <- r[[names(r)=="SFED"]]
+  set.names(r_sfed,utils$extract_date(sources(r_sfed)))
+  df_sfed <- terra::extract(x= r_sfed, y= gdf_subset)
+  exactextractr::exact_extract(x = r_sfed,y = gdf_subset)
+  gdf_subset_buffer <- st_buffer(gdf_subset, d = 1000)
+  df_grid <- exactextractr::exact_extract(
+    r_sfed,
+    gdf_subset,
+    fun = "mean",
+    append_cols = "grid_id"
+  )
+}
+
+```
+
+```{r}
+r_samp <- rast(df_cog_contents$vp[1:3])
+r_samp <- r_samp[[names(r_samp)=="SFED"]]
+set.names(
+  r_samp,utils$extract_date(sources(r_samp))
+)
+terra::extract( r_samp,gdf_samp)
+```
+
+
+```{r}
+r_sample_size <- 1:200
+
+# Break into groups of 20
+split_sample <- split(r_sample_size, ceiling(seq_along(r_sample_size)/20))
+
+l_df_time <- split_sample |> 
+  map(
+    \(tmp_samp){
+      print(tmp_samp )
+      df_time <- system.time(
+        r <- rast(df_cog_contents$vp[tmp_samp])
+      )
+      return(df_time)
+    }
+  )
+df_time_purrr <- l_df_time |> 
+  map(
+    \(x) tibble(
+      user = x[1],
+      system = x[2],
+      elapsed = x[3]
+    )
+  ) |> 
+  list_rbind()
+
+r_sample_size <- 201:400
+
+# Break into groups of 20
+split_sample <- split(r_sample_size, ceiling(seq_along(r_sample_size)/20))  
+
+l_df_time_mirai <- 
+  split_sample |> 
+  mirai::mirai_map(
+    
+    \(tmp_samp){
+      box::use(dplyr[...])
+      box::use(ggplot2[...])
+      box::use(lubridate[...])
+      box::use(janitor[clean_names])
+      box::use(purrr[...])
+      box::use(extRemes[...])
+      box::use(gghdx[...])
+      box::use(reactable[...])
+      box::use(tidyr[...])
+      box::use(patchwork)
+      box::use(readr)
+      box::use(sf[...])
+      box::use(terra[...])
+      box::use(stringr[...])
+      
+      box::use(
+        AzureStor,
+        arrow
+      )
+      
+      
+      box::use(paths = . / R / path_utils)
+      box::use(. / src / utils / blob)
+      box::use(./R/utils) #
+      
+      bc <- blob$load_containers()
+      gc <- bc$GLOBAL_CONT
+      
+      Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
+      Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
+      df_cog_contents <- AzureStor::list_blobs(
+        container = gc,
+        prefix = "raster/cogs/aer_area_300s"
+      )
+      
+      
+      df_cog_contents <- df_cog_contents |>
+        dplyr::mutate(
+          date = utils$extract_date(name),
+          vp = paste0("/vsiaz/global/",name)
+        ) |>
+        dplyr::filter(
+          str_detect(string = name,pattern = ".tif$")
+        )
+      
+      
+      df_time <- system.time(
+        r <- terra::rast(df_cog_contents$vp[tmp_samp])
+      )
+      return(df_time)
+    }
+  )
+
+l_df_time_mirai[.progress]
+df_time_mirai <- l_df_time_mirai[] |> 
+   map(
+    \(x) tibble(
+      user = x[1],
+      system = x[2],
+      elapsed = x[3]
+    )
+  ) |> 
+  list_rbind()
+df_time_purrr
+df_time_mirai
+library(mirai)
+daemons(4)
+vec <- c(1, 1, 4, 4, 1, 1, 1, 1)
+system.time(mirai_map(vec, Sys.sleep)[])
+cl <- parallel::makeCluster(4)
+system.time(parallel::parLapply(cl, vec, Sys.sleep))
+
+wat <- mirai::call_mirai(l_df_time_mirai)
+mirai::
+  wat <- mirai::eval_mirai(l_df_time_mirai)
+l_df_time_mirai$`1`[]
+mirai_unpack <- l_df_time_mirai[.flat]
+mirai_unpack <- l_df_time_mirai[]
+df_time_mirai <- l_df_time_mirai |> 
+  list_rbind()
+
+
+
+terra::setGDALconfig("GDAL_CACHEMAX",0)
+
+r <- rast(df_cog_contents$vp[1:10])
+gc()
+r <- NULL
+hello <- rast(df_cog_contents$vp[1:10])
+```
+
+
+```{r}
+vp_latest <- df_cog_contents |> 
+  filter(date == max(date)-10) |> 
+  pull(vp)
+
+r_latest <- rast(vp_latest)
+r_sfed_latest <- r_latest[[names(r_latest)=="SFED"]]
+doy_latest <- yday(utils$extract_date(sources(r_sfed_latest)))
+set.names(r_sfed_latest,"value")
+
+r_baseline_subset <- r_baseline[[doy_latest]]
+set.names(r_baseline_subset,"baseline")
+r_merge <- rast(
+  list(
+    r_sfed_latest,
+    r_baseline_subset
+    
+  )
+)
+r_merge$abs_anom <- r_merge$value - r_merge$baseline
+
+
+```
+
+```{r}
+
+r_merge_anom <- r_merge$abs_anom
+rc <- classify(r_merge_anom,cbind(-.05,0.05,NA), right = FALSE)
+
+
+pal <- colorNumeric(c("#FFFFCC", "#41B6C4" ,"#0C2C84"), values(rc),
+                    na.color = "transparent")
+
+leaflet() |> 
+  
+  addProviderTiles(leaflet::providers$CartoDB) |> 
+  addRasterImage(rc, colors = pal, opacity = 0.4)
+
+r_merge$abs_anom |> 
+  plot()
+```
