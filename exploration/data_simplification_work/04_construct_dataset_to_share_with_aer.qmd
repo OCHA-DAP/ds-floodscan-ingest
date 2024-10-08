@@ -1,0 +1,680 @@
+---
+title: FloodScan Data Simplification Proposal
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+    embed-resoures: true
+    smooth-scroll: true
+execute:
+  include: true
+  echo: true
+  warning: false
+  message: false
+  eval: true
+  results: "asis"
+  out.width: "100%"
+  code-fold: true
+editor: visual
+---
+
+## Overview
+
+We aim to create simplified analysis-ready version of AER FloodScan that can be shared with users on the HDX platform. The goal is to facilitate near real time monitoring and contextualization of flooding across humanitarian responses. To achieve this, we propose the following simplified data structure and file formats for sharing:
+
+1.  a 90d rotating zip file containing 90 Cloud Optimized GeoTiffs (1 per day). With the following bands: `SFED` , `SFED_ANOMALY`, and `SFED_BASELINE`
+
+Below we display the file structure and illustrate some crude, but promising ways this simplification could be easily usable for a wide user-base on HDX. For the sake of this example we simulate a file package that would have been downloaded for Somalia on the 15th of January 2024.
+
+```{r}
+box::use(
+  terra[...],
+  sf[...],
+  dplyr[...],
+  stringr[...],
+  lubridate[...],
+  purrr[...],
+  tidyr[...],
+  ggplot2[...],
+  ggiraph[...],
+  gghdx,
+  janitor[clean_names],
+  exactextractr,
+  arrow,
+  scales,
+  AzureStor,
+  furrr,
+  glue,
+  zoo,
+  
+  paths =../../R/path_utils,
+  rp= ../../R/return_period,
+  cogger =../../R/fs_cogs,
+  
+  ../../R/utils,
+  ../../src/utils/blob
+)
+
+
+sf_use_s2(FALSE)
+
+
+Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
+Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
+
+
+bc <- blob$load_containers()
+gc <- bc$GLOBAL_CONT
+pc <- bc$PROJECTS_CONT
+
+fps <- paths$load_paths(virtual = TRUE)
+lgdf <- utils$download_fieldmaps_sf(
+  iso3 = "SOM",
+  layer = c("som_adm0","som_adm1","som_adm2")
+  )
+
+gdf_bbox <- st_bbox(lgdf$som_adm0) |>
+  st_as_sfc()
+```
+
+## Data Structure
+
+We imagine that many users will be using a desktop GIS application and will inspect and contextualize the individual `.tif` files contained in the zip. Here is a screenshot of a QGIS environment with the AER FloodScan data loaded along with some extra contextual layers.
+
+```{r}
+#| echo: false
+
+fp_zonal <- paths$load_paths(path_name = "FP_SFED_SOM_ADM1", virtual_path = F)
+
+
+AzureStor$download_blob(
+  container = pc,
+  src = fp_zonal,
+  dest = tf <- tempfile(fileext = ".parquet"),
+  overwrite = T
+)
+
+
+df_zonal <- arrow$read_parquet(tf) |>
+  clean_names()
+
+PUB_DATE_EXAMPLE <- as_date("2024-07-01")
+max_date_zonal <-  max(df_zonal$date)
+
+r_baseline_presmooth20d <- rast(
+  list.files("data/doy_rasters/20d/last10y/",full.names = T) 
+)
+
+r_baseline_presmooth10d <- rast(
+  list.files("data/doy_rasters/10d/last10y/",full.names = T) 
+    
+)
+
+r_baseline <- rast(fps$FP_DOY_LAST_2014_2023)
+r_baseline_cropped <- crop(r_baseline, gdf_bbox)
+
+r_baseline_pre20 <- crop(r_baseline_presmooth20d, gdf_bbox)
+r_baseline_pre10 <- crop(r_baseline_presmooth10d, gdf_bbox)
+# ext(r_baseline_cropped)
+  
+
+r_baseline_post10 <- roll(
+  x= r_baseline_cropped,
+  n = 10,
+  fun = mean,
+  type = "around",
+  circular = TRUE,
+  na.rm = TRUE
+)
+r_baseline_post20 <- roll(
+  x= r_baseline_cropped,
+  n = 20,
+  fun = mean,
+  type = "around",
+  circular = TRUE,
+  na.rm = TRUE
+)
+
+```
+
+
+## Check smoothing
+Let's do a quick example where we look at the smoothed values vs one another
+```{r}
+box::use(ggtext[...],
+         ggplot2[...],
+         gghdx,
+         ggiraph[...])
+
+lr_baselines <- list(
+  "POST-SMOOTH (20 D)"= r_baseline_post20,
+  "POST-SMOOTH (10 D)"= r_baseline_post10,
+  "PRE-SMOOTH (20 D)" = r_baseline_pre20,
+  "PRE-SMOOTH (10 D)" = r_baseline_pre10
+)
+
+df_baselines_compare <- lr_baselines |> 
+  imap(
+    \(tr,type){
+    exactextractr$exact_extract(
+      x=tr,
+      y= lgdf$som_adm0,
+      fun = "mean"
+      ) |> 
+        pivot_longer(cols = everything()) |> 
+        separate(
+          name, into = c("stat","name")
+        ) |> 
+        mutate(
+          name = as.numeric(name),
+          type = type
+              )
+  }
+  ) |> 
+  list_rbind()
+
+
+
+palette_compare_smoothing <- 
+  c(
+    "PRE-SMOOTH (20 D)" = "red",
+    "POST-SMOOTH (20 D)" = "darkred",
+    "PRE-SMOOTH (10 D)" = "lightgreen",
+    "POST-SMOOTH (10 D)" = "darkgreen"
+  )
+
+p_adm0_smooth_compare <- df_baselines_compare |>
+  filter(
+    # type != "BASELINE-PRESMOOTH (10 D)",
+  ) |> 
+  ggplot(
+    aes(x= name, y= value, color = type, group= type)
+  )+
+  geom_point_interactive(
+    size =2.2, alpha= 0.3, 
+    aes(tooltip = glue$glue(
+      "DOY: {name}
+      SFED: {value}
+      Type:{type}"
+    )))+
+  geom_line(alpha=0.8)+
+  scale_y_continuous(labels = scales::label_percent())+
+  scale_colour_manual(values = palette_compare_smoothing)+
+  labs(
+    x= "Historical average per day (smoothed)",
+    y= "SFED (Flood Fraction)",
+    title = "Comparison of smooothing methods for baseline calculations",
+    subtitle = "Somalia - National Level",
+    caption = "Methodology:
+    a.) PRE-SMOOTH: Daily SFED values smoothed with centered rolling mean with +/- 10 days. Average SFED flood fraction taken per Day of Year (DOY) for the last 10 years.
+    b.) POST-SMOOTH: Last 10 years of SFED data averaged by DOY, averaged DOY rasters smoothed with centered rolling mean +/-10d"
+  )+
+  theme(
+    plot.caption = element_text(hjust= 0,size= 11, family= "")
+  )
+p_adm0_smooth_compare
+```
+
+
+
+```{r}
+# zoom in on issues 
+adm0_smooth_compare_issue <- df_baselines_compare |>
+  filter(
+    name %in% c(1:15,355:366)
+  ) |> 
+  mutate(
+    name = ifelse(name> 300, name - 366,name)
+  ) |> 
+  ggplot(
+    aes(x= name, y= value, color = type, group= type)
+  )+
+  geom_point_interactive(
+    size =1, alpha= 1, 
+    aes(tooltip = glue$glue(
+      "DOY: {name}
+      SFED: {value}
+      Type:{type}"
+    )))+
+  geom_line(alpha=1)+
+  scale_y_continuous(labels = scales$label_percent())+
+  scale_colour_manual(values = palette_compare_smoothing)+
+  labs(
+    x= "Historical average per day (smoothed)",
+    y= "SFED (Flood Fraction)",
+    title = "Comparison of smooothing methods for baseline calculations",
+    subtitle = "Somalia - National Level",
+    caption = "Methodology:
+    a.) PRE-SMOOTH: Daily SFED values smoothed with centered rolling mean with +/- 10 days. Average SFED flood fraction taken per Day of Year (DOY) for the last 10 years.
+    b.) POST-SMOOTH: Last 10 years of SFED data averaged by DOY, averaged DOY rasters smoothed with centered rolling mean +/-10d"
+  )+
+  theme(
+    plot.caption = element_text(hjust= 0,size= 11, family= "")
+  )
+adm0_smooth_compare_issue
+# ggiraph$girafe(
+#   ggobj = p_adm0_smooth_compare
+# )
+```
+
+I want to check consistency of methods.
+
+```{r}
+# same thing as above, but at admin 1 level. Not useful... YET
+lrdf_doy_adm1 <- lr_baselines |> 
+  imap(
+    \(tr,type){
+    exactextractr$exact_extract(
+      x=tr,
+      y= clean_names(lgdf$som_adm1),
+      fun = "mean",
+      append_cols = c("adm1_en","adm1_pcode")
+      ) |> 
+        pivot_longer(
+          -c("adm1_en","adm1_pcode")
+          ) |> 
+        separate(
+          name, into = c("stat","doy")
+        ) |> 
+        mutate(
+          type = type,
+          doy = as.numeric(doy)
+              ) |> 
+        arrange(adm1_en,doy)
+  }
+  ) 
+
+# raster data frame (rdf) day-of-year (DOY) baseline band aggregated admin 1
+rdf_doy_adm1 <- lrdf_doy_adm1$`PRE-SMOOTH (10 D)` 
+
+```
+
+
+Compare the DOY baseline aggregated directly from raster band to a  rolling mean calculated on straight zonal rolling stats mean from entire historical record.
+
+good enough for rock & roll?
+
+```{r}
+baseline_start_date <- as_date("2014-01-01")
+baseline_end_date <- as_date("2023-12-31")
+
+
+
+zdf_smooth <- df_zonal |> 
+  group_by(adm1_en, adm1_pcode) |> 
+  arrange(adm1_en,adm1_pcode,date) |> 
+  filter(
+    # date %in% date_seq_padded
+  ) |> 
+  mutate(
+    doy = yday(date),
+    value_smooth = zoo$rollmean(value, k = 11, align = "center",fill = NA),
+  ) |> 
+  # print(n= 100)
+    filter(
+      date %in% seq(baseline_start_date, baseline_end_date,by ="day")
+      # something weird going on here where 2013 gives the first vals correct, but 2014 is 5 lagged
+    # year(date) %in% 2013:2023
+  ) 
+
+zdf_doy_adm1 <- zdf_smooth |> 
+  group_by(adm1_en, adm1_pcode, doy) |> 
+  summarise(
+    zonal_roll_value = mean(value_smooth,na.rm=T),.groups="drop"
+  )
+
+gghdx$gghdx()
+zrdf_doy_adm1 <- left_join(
+  rdf_doy_adm1, 
+  zdf_doy_adm1,
+) |> 
+  mutate(
+    diff =value - zonal_roll_value
+  )
+
+
+zrdf_doy_adm1 |> 
+  mutate(
+    color_diff = diff>4e-4
+  ) |> 
+    ggplot(
+    aes(x= value, y= zonal_roll_value, color = color_diff)
+  ) +
+  geom_point() +
+  geom_abline(slope = 1, color = "red")+
+  facet_wrap(~adm1_en,scales="free")+
+  theme(
+    legend.position = "none"
+  )
+  
+```
+
+Quick look at some of the values that are different. Haven't quite worked out why this is.
+```{r}
+zrdf_doy_adm1 |> 
+  ggplot(
+    aes(x= diff)
+  )+
+  geom_histogram(bins = 100)+
+  scale_y_log10()+
+  scale_x_continuous(trans = scales$pseudo_log_trans())
+
+
+zrdf_doy_adm1 |> 
+  mutate(
+    color_diff = diff>4e-4
+  ) |> 
+  filter(color_diff)
+```
+
+
+
+## Create Dataset
+
+```{r}
+fs_meta <- utils$floodscan_cog_meta_df(container = gc)
+START_DATE_EXAMPLE <- PUB_DATE_EXAMPLE - days(90-1)
+DATE_SEQ_EXAMPLE <- seq(START_DATE_EXAMPLE,PUB_DATE_EXAMPLE,by ="days")
+
+urls <- fs_meta |> 
+  filter(
+    date %in% DATE_SEQ_EXAMPLE
+  ) |> 
+  pull(urls)
+
+lr <- furrr$future_map(
+  urls, \(tu){
+    cat(tu,"\n")
+    rast(
+      tu,
+      win = st_as_sf(gdf_bbox) 
+      )
+  }
+)
+
+r <- rast(lr)
+
+r_sfed <- r[[names(r)=="SFED"]]
+
+set.names( # set in place
+  r_sfed,
+  utils$extract_date(sources(r_sfed))
+  )
+
+```
+
+
+```{r}
+
+
+td <- file.path(tempdir(),"aer_floodscan_300s_SFED_90d")
+
+# for some reason w/ in map writeRaster can't write to a dir
+# that is not already actually created.
+if (!dir.exists(td)) {
+  dir.create(td, recursive = TRUE)
+}
+dir.exists(td)
+
+doys <- as.character(yday(names(r_sfed)))
+
+# doy <- doys[1]
+# furrr$future_walk(
+lr_sample <-   furrr$future_map(
+    doys , \(doy){
+      cat(doy,"\n")
+      rb <- r_baseline_pre10[[doy]]
+      rd <- r_sfed[[yday(names(r_sfed))==doy]]
+      dt <- names(rd)
+      set.names(rd, "SFED")
+      set.names(rb, "SFED_BASELINE")
+      rc <- rast(list(rd,rb))
+      
+      dt_chr <- format(as_date(dt),'%Y%m%d')
+      fn <- glue$glue("somalia_aer_floodscan_sfed_{dt_chr}.tif")
+      # bn <- basename(sources(rc)[1])
+      fp <- file.path(td,fn) 
+      writeRaster(rc,
+                  filename = fp,
+                  filetype = "COG",
+                  gdal = c("COMPRESS=DEFLATE",
+                           "SPARSE_OK=YES",
+                           "OVERVIEW_RESAMPLING=AVERAGE"),
+                  overwrite = TRUE
+      )
+      return(rc)
+    }
+  )
+
+
+
+zip_name <- glue$glue("{format(as_date(PUB_DATE_EXAMPLE),'%Y%m%d')}_somalia_aer_floodscan_300s_SFED_90d")
+zip(
+  zipfile = zip_name,
+  files = list.files(td,full.names = TRUE),
+  extras = "-j"
+)
+```
+
+
+Double check I got everything right - Raster data set looks good.
+```{r}
+r_sample <- rast(lr_sample)
+r_sample_baseline <- r_sample[[names(r_sample)=="SFED_BASELINE"]]
+r_sample_values <- r_sample[[names(r_sample)=="SFED"]]
+
+set.names(r_sample_baseline,names(r_sfed))
+set.names(r_sample_values,names(r_sfed))
+
+rdf_sample <- list(
+  "SAMPLE_BASELINE"= r_sample_baseline,
+  "SAMPLE_VALUES" = r_sample_values
+) |> 
+  imap(
+    \(tr,nm){
+      exactextractr$exact_extract(
+        x =tr,
+        y= lgdf$som_adm1,
+        append_cols = "ADM1_EN", 
+        fun = "mean"
+      ) |> 
+        pivot_longer(
+          -ADM1_EN,
+          values_to= nm
+        ) |> 
+        separate(
+          name,c("stat","date"),sep = "\\."
+        ) |> 
+        mutate(
+          date= as_date(date),
+          doy = yday(date)
+        ) |> 
+        clean_names()
+    }
+  ) |> 
+  reduce(left_join)
+
+df_consistency_check <- rdf_sample |> 
+  left_join(
+    zdf_doy_adm1
+  ) |> 
+  left_join(
+    df_zonal
+  ) |> 
+  arrange(
+    adm1_en, date,
+  ) 
+  
+
+# check baseline values
+df_consistency_check |> 
+  ggplot(
+    aes(x= sample_baseline, y= zonal_roll_value)
+  )+
+  geom_point()+
+  facet_wrap(~adm1_en)
+
+
+# check raw values
+df_consistency_check |> 
+  ggplot(
+    aes(x= sample_values, y= value)
+  )+
+  geom_point()+
+  facet_wrap(~adm1_en)
+
+```
+
+Let's move on to tabular
+
+## Tabular Data set
+
+So as we confirmed above we can just take the zonal stats above to get most of our main attributes: `SFED`, `SFED (Baseline)`. In fact we've already done that, let's just rename the columns as we want them
+
+```{r}
+# need to add back in admin pcodes
+tabular_dataset_prepped <- rdf_sample |> 
+  select(-stat, - doy) |> 
+  rename(
+    SFED = sample_values,
+    `SFED Baseline` = sample_baseline
+  ) |> 
+  relocate(
+    date,.before = adm1_en
+  ) |> 
+  relocate(
+        SFED, .before = `SFED Baseline`
+  )
+
+```
+
+However to calculate the RPs we need to look at the longer dataset.
+
+### RPs
+
+```{r}
+# box::reload(rp)
+
+df_year_max = df_zonal |> 
+  group_by(adm1_en,adm1_pcode, year_date = floor_date(date, "year")) |> 
+  summarise(
+    value = max(value),
+    .groups = "drop"
+  ) |> 
+  filter(
+    year(year_date) < year(PUB_DATE_EXAMPLE)
+  )
+
+rps_calc <-  seq(1,1000, by =0.01)
+df_lp3_funcs <- df_year_max |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  reframe(
+    RP =  rps_calc,
+    RV = rp$rv_lp3(x = value, return_period = rps_calc)
+  ) |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  summarise(
+  fun_rp = list(
+      approxfun(
+        x = RV,
+        y =RP,
+        method = "linear", 
+        rule = 2
+      )
+    ),
+    fun_rv = list(
+      approxfun(
+        x = RP,
+        y =RV,
+        method = "linear",
+        rule = 2
+      )
+  ),
+  .groups ="drop"
+  )
+  
+
+
+df_zonal_rps <- df_zonal |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  summarise(
+    date = list(date),
+    value = list(value), 
+    .groups = "keep"
+  ) |> 
+  left_join(
+    df_lp3_funcs, by = c("adm1_en","adm1_pcode")
+  ) |> 
+  mutate(
+     rp_lp3 = list(map(value,  fun_rp) |> unlist()),
+  ) |> 
+  select(adm1_en,adm1_pcode, date, value, rp_lp3) |> 
+  unnest(cols = c("date", "value", "rp_lp3")) |> 
+  ungroup()
+```
+
+
+```{r}
+tabular_dataset_compiled <- tabular_dataset_prepped |> 
+  left_join(
+    df_zonal_rps |> 
+      select(-value),
+    by= c("adm1_en", "date")
+  ) |> 
+  relocate(
+    adm1_pcode, .after= adm1_en
+  ) 
+
+tabular_dataset_compiled |> 
+  mutate(
+    rp_rounded = round(rp_lp3, 2),
+    RP = case_when(
+      rp_rounded >=100~">= 100",
+      rp_rounded <= 1.01~"< 1.01",
+      .default = as.character(rp_rounded)
+    )
+  ) |> 
+  select(
+    -rp_lp3, -rp_rounded
+  )
+  
+```
+
+
+## Appendix
+Same baseline comparisons, but admin 1 level
+
+```{r}
+#| eval: true
+
+df_baselines_compare_adm1 |>
+  mutate(
+    name = as.numeric(name)
+  ) |> 
+  filter(
+    type != "BASELINE-PRESMOOTH (10 D)"
+  ) |> 
+  ggplot(
+    aes(x= name, y= value, color = type, group= type)
+  )+
+  geom_point(size = 1, alpha= 0.1)+
+  geom_line(alpha=0.1)+
+  scale_y_continuous(labels = scales$label_percent())+
+  scale_colour_manual(values = palette_compare_smoothing)+
+  facet_wrap(~ADM1_EN)+
+  labs(
+    x= "Historical average per day (smoothed)",
+    y= "SFED (Flood Fraction)",
+    title = "Comparison of smooothing methods for baseline calculations",
+    subtitle = "Somalia - National Level",
+    caption = "Methodology:
+    a.) PRE-SMOOTH: Daily SFED values smoothed with centered rolling mean with +/- 10 days. Average SFED flood fraction taken per Day of Year (DOY) for the last 10 years.
+    b.) POST-SMOOTH: Last 10 years of SFED data averaged by DOY, averaged DOY rasters smoothed with centered rolling mean +/-10d"
+  )+
+  theme(
+    plot.caption = element_text(hjust= 0,size= 11, family= "")
+  )
+  
+```
