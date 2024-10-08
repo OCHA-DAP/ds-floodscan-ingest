@@ -36,12 +36,25 @@ r_365 <- rast(
   )
 
 # historical smoothed baseline (20d)
-r_historical <- rast(
+r_historical_static_baseline <- rast(
   fps$FP_DOY_NO_THRESH_SMOOTHED20d,
   win = gdf_aoi$som_adm0
   )
 
+# This one is not smoothed yet
+r_historical_10yr_baseline <- rast(
+  fps$FP_DOY_LAST_2014_2023,
+  win = gdf_aoi$som_adm0
+)
 
+r_historical_10yr_baseline_smoothed <- roll(
+  x= r_historical_10yr_baseline,
+  n = 20,
+  fun = mean,
+  type = "around",
+  circular = TRUE,
+  na.rm = TRUE
+)
 
 
 # Demo Raster -------------------------------------------------------------
@@ -101,12 +114,56 @@ fs_spatraster <- function(
       cat(date_chr,"\n")
 
       nrt_subset <- nrt_raster[[date_chr]]
+
       historical_subset <- historical_raster[[doy_tmp]]
+
       set.names(nrt_subset,"SFED")
       set.names(historical_subset,"SFED_BASELINE")
+
       r <- rast(list(nrt_subset, historical_subset))
+
       logger$log_info("performing  anomaly calculation")
       r[["SFED_ANOM"]] <- r[["SFED"]] - r[["SFED_BASELINE"]]
+      time(r) <- as.Date(rep(date_tmp,nlyr(r)))
+      r
+    }
+  )
+}
+
+fs_spatraster2 <- function(
+  nrt_raster,
+  historical_raster1,
+  historical_raster2,
+  date,
+  n_days
+){
+  end_date <- as.Date(date)
+  start_date <- end_date - (n_days-1)
+  date_seq <-  seq(start_date, end_date,by = "day")
+
+  map(
+    date_seq, \(date_tmp){
+      doy_tmp <- yday(date_tmp)
+      date_chr <-  as.character(date_tmp)
+      cat(date_chr,"\n")
+
+      nrt_subset <- nrt_raster[[date_chr]]
+
+      historical_subset1 <- historical_raster1[[doy_tmp]]
+
+      set.names(nrt_subset,"SFED")
+      set.names(historical_subset1,"SFED_BASELINE (static)")
+
+
+      if(is.null(historical_raster2)){
+        r <- rast(list(nrt_subset, historical_subset1))
+      }
+
+      if(!is.null(historical_raster2)){
+        historical_subset2 <- historical_raster2[[doy_tmp]]
+        set.names(historical_subset2,"SFED BASELINE (10 yr)")
+        r <- rast(list(nrt_subset, historical_subset1, historical_subset2))
+      }
       time(r) <- as.Date(rep(date_tmp,nlyr(r)))
       r
     }
@@ -161,3 +218,58 @@ zip(
   files = td,
   extras = "-j"
 )
+
+
+lr2 <- fs_spatraster2(
+  nrt_raster = r_365,
+  historical_raster1= r_historical,
+  historical_raster2= r_historical_10yr_baseline_smoothed,
+  date = FILE_DATE_SIMULATE,
+  n_days = NUMBER_DAYS
+)
+
+td <- file.path(tempdir(),"aer_area_300s_SFED_90d")
+
+# for some reason w/ in map writeRaster can't write to a dir
+# that is not already actually created.
+if (!dir.exists(td)) {
+  dir.create(td, recursive = TRUE)
+}
+
+system.time(
+  lr2 |>
+    walk(
+      \(r_tmp){
+        date <- unique(time(r_tmp))
+        date_prefix = format(date, "%Y%m%d")
+        cat(date_prefix,"\n")
+
+        # tempfilename
+        tfn <- glue("{date_prefix}_aer_area_300s_SFED_processed.tif")
+        tfp <- file.path(td, tfn)
+
+        logger$log_info("writing raster")
+
+        writeRaster(
+          r_tmp,
+          filename = tfp,
+          filetype = "COG",
+          gdal = c("COMPRESS=DEFLATE",
+                   "SPARSE_OK=YES",
+                   "OVERVIEW_RESAMPLING=AVERAGE"),
+          overwrite = TRUE
+        )
+      }
+    )
+)
+# exerimenting w/ gdalcubes
+zip_name <- glue("{zip_date_prefix}_aer_area_300s_SFED_90d.zip")
+zip(
+  zipfile = zip_name,
+  files = td,
+  extras = "-j"
+)
+
+
+
+

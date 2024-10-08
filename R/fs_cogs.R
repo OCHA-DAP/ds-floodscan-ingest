@@ -43,7 +43,7 @@ box::use(rnc= RNetCDF)
 #' }
 
 
-fs_write_cog <- function(r,path){
+fs_write_cog <- function(r,path,overwrite){
 
   date_suffix <- format(as.Date(unique(time(r))), "%Y%m%d")
   out_cog_file_name <- paste0("aer_fs_300s_",date_suffix,".tif")
@@ -58,7 +58,8 @@ fs_write_cog <- function(r,path){
                      filetype = "COG",
                      gdal = c("COMPRESS=DEFLATE",
                               "SPARSE_OK=YES",
-                              "OVERVIEW_RESAMPLING=AVERAGE")
+                              "OVERVIEW_RESAMPLING=AVERAGE"),
+                     overwrite = overwrite
   )
 }
 
@@ -160,3 +161,19 @@ fs_extent <- function(nc_ob){
   return(ex)
 }
 
+
+#' @export
+cog_cloud_config <- function(){
+  # set recommended variables for cloud access:
+  box::use(terra)
+  # https://gdalcubes.github.io/source/concepts/config.html#recommended-settings-for-cloud-access
+  terra$setGDALconfig("VSI_CACHE", "TRUE")
+  terra$setGDALconfig("GDAL_CACHEMAX","30%")
+  terra$setGDALconfig("VSI_CACHE_SIZE","10000000")
+  terra$setGDALconfig("GDAL_HTTP_MULTIPLEX","YES")
+  terra$setGDALconfig("GDAL_INGESTED_BYTES_AT_OPEN","32000")
+  terra$setGDALconfig("GDAL_DISABLE_READDIR_ON_OPEN","EMPTY_DIR")
+  terra$setGDALconfig("GDAL_HTTP_VERSION","2")
+  terra$setGDALconfig("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES","YES")
+  terra$setGDALconfig("GDAL_NUM_THREADS", "ALL_CPUS")
+}

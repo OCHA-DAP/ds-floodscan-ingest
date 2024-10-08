@@ -7,6 +7,7 @@
 exploration/rsconnect/*
 exploration/data_simplification_work/rsconnect/*
 exploration/data_simplification_work/qgis/*
+data/*
 
 *.json
 *.zip

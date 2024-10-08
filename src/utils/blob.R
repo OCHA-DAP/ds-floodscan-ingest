@@ -171,6 +171,7 @@ load_containers <- function(
 #' @param service Service to access, either `blob` (default) or `file.`
 #' @param stage Store to access, either `prod` (default) or `dev`. `dev`
 #' @param storage_account Storage account to access. Default is `imb0chd0`
+#' @export
 azure_endpoint_url <- function(
     service = c("blob", "file"),
     stage = c("dev", "prod"),

@@ -52,13 +52,13 @@ We create a metadata data.frame catalog from the list of COGS
 Due to slow loading COG data sets (due to metadata), it would follow that we should only query/load the COG rasters required each day which will be a small fraction of the historical data.
 ```{r}
 df_cog_contents <- df_cog_contents |>
-  dplyr::mutate(
+  mutate(
     date = utils$extract_date(name),
     # day of year (doy)
     doy = lubridate::yday(date),
     vp = paste0("/vsiaz/global/",name)
   ) |>
-  dplyr::filter(
+  filter(
     str_detect(string = name,pattern = ".tif$")
   )
 ```
@@ -80,24 +80,11 @@ For the reference period we would calculate the average SFED value across each d
 The fixed reference period is vastly simpler as we can do a 1 time calculation across reference years to create a single raster that can be re-applied. For the rolling baseline calculation we need to calculate this raster every year.
 
 ```{r}
-box::reload(paths)
+
 fp_doy_avg_last_10 <- paths$load_paths("FP_DOY_LAST_2014_2023",virtual_path =T)
 fvps <- paths$load_paths(virtual_path =T)
 
 r_baseline_10 <- rast(fp_doy_avg_last_10)
-
-lck <- AzureStor$list_blobs(
-  container = pc,
-  prefix = "ds-floodscan-ingest/aer_area_300s_doy_mean_baseline_2014"
-)
-
-AzureStor$download_blob(
-  container = pc, 
-  src = "ds-floodscan-ingest/aer_area_300s_doy_mean_baseline_2014_2023.tif",
-  dest = td <- tempfile(fileext= ".tif")
-)
-r_baseline_10<- rast(td)
-
 
 ```
 

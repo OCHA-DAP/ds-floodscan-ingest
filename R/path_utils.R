@@ -38,6 +38,7 @@ load_paths <-function(virtual_path = FALSE,path_name=NULL){
   ret$FP_SFED_SOM_ADM1 ="ds-floodscan-ingest/df_aer_sfed_som_adm1_zstats.parquet"
 
   ret$FP_GLOBAL_FLOODS_DB = "ds-floodscan-ingest/gfd_event_stats_20215_13_error_fixed_2.csv"
+  ret$FP_GLOBAL_FLOODS_EXTRACTED = "ds-floodscan-ingest/df_aer_flood_db_historical.parquet"
 
   if(virtual_path){
     ret <-  map(

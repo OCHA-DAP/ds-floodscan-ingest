@@ -23,45 +23,58 @@ editor: visual
 ---
 
 ```{r setup}
-box::use(dplyr[...])
-box::use(ggplot2[...])
-box::use(lubridate[...])
-box::use(janitor[clean_names])
-box::use(purrr[...])
-box::use(extRemes[...])
-box::use(gghdx[...])
-box::use(reactable[...])
-box::use(tidyr[...])
-box::use(patchwork)
-
-box::use(arrow)
-box::use(AzureStor)
-
-box::use(paths = .. / R / path_utils)
-box::use(.. / src / utils / blob)
-
+box::use(
+  dplyr[...],
+  ggplot2[...],
+  stringr[...],
+  lubridate[...],
+  purrr[...],
+  extRemes[...],
+  gghdx[...],
+  reactable[...],
+  tidyr[...],
+  patchwork,
+  arrow,
+  AzureStor,
+  scales,
+  ggridges,
+  janitor[clean_names],
+  paths = .. / R / path_utils,
+  .. / src / utils / blob
+  )
 gghdx()
 ```
 
 **Work in Progress**
 
-# Key Takeaways
+# Intro
 
-- The differences in RP calculation methods are smaller at lower RP values (i.e < 5 year RP) typically used in AA framework design. The differences get larger at higher return periods, and the resulting values are sensitive to the shape of the distributions.
-- The classic empirical method using the Weibell formula (and used in `anticipy`) can be thought of as a percentile algorithm. There are several percentile calculation algorithms that give slightly different results. **When using Empirical methods, team should standardize.**
-- In some cases the distribution-based methods are either required or more appropriate. These include:
-  + calculating `return periods levels` for `return periods` > historical record
-  + providing error terms/confidence metrics
-  + Converting historical "raw" values to return periods. This requires a method that can appropriately extrapolate return periods beyond the historical record. This may not be the common use-case, but is required for the suggested FloodScan admin 2 tabular data column where we would need to classify extreme values whose return periods exceed the historical record.
-- **Outstanding Questions** (@sec-outstanding)
+## Key Recommendations
 
-# Intro/Overview
+1.  Internal pipeline should include RP calculations made using Log-Pearson Type III (LP3).The value should be kept as the raw calculated RP value. Additionally, we may consider a. including columns to hold RPs calculated from Gumbel, GEV, and Empirical Distributions or b. have functions at our disposal to calculate these as needed.
+2.  HDX pipeline should use RP value from LP3 calculation. We will provide raw figures from 1-100 and classify values above the lower an upper bounds as `<=1` & `>100`, respectively.
+3.  Team should revisit RP calculation for data sets with small historical records (i.e IRI seasonal forecast)
+
+## Takeaways
+
+-   The resulting differences in RP calculations from different methods on FloodScan data is smaller at lower RP values (i.e \< 5 year RP). The differences get larger at higher return periods, and the resulting values are sensitive to the shape of the distributions.
+-   In some cases the distribution-based methods are either required or more appropriate. These include:
+    -   calculating return period values with low sample size. The closer the return period of interest gets to the length of the historical record the more important this becomes.
+    -   calculating `return values` for `return periods` \> historical record. This cannot be done empirically.
+    -   providing error terms/confidence metrics.
+    -   Converting historical "raw" values to return periods. This requires a method that can appropriately extrapolate return periods beyond the historical record.
+-   The classic empirical method can be thought of as a percentile algorithm. There are several percentile calculation algorithms that give slightly different results. **When using Empirical methods, team should standardize.**
 
 ## Background
 
 As part of our AER FloodScan-HDX pipeline we will be providing a tabular (excel/csv) data set with Admin 2 level zonal statistics of simplified AER FloodScan raster data. SFED raster pixel values represent estimated flood fraction (%). Therefore, our principle zonal statistic calculated will most likely be `mean` Standard Flood Event Depiction (SFED) calculated at the Admin 2 level to provide an average flood fraction for the Admin 2 zone.
 
-Certain data sharing limitations prevent us from sharing the entire historical record of data. Therefore, we would like to provide some key metrics so that the user can assess the values more relatively with respect to the historical record. Therefore, in addition to a time series of `mean` SFED values for each day & admin unit, we have proposed providing return period estimation for the day. This document reviews the `admin 2 return period` calculations for the work on FloodScan  based on [this proposal](https://docs.google.com/document/d/1PTSqCjW0vFjrht9GwkUbMTopbJ5ONwJBjMgpLDvpWnI/edit). Below is a blank template of what is proposed for the tabular data set.
+Data sharing limitations prevent us from sharing the entire historical record of data. Therefore, we would like to provide some key metrics so that the user can better contextualize the values with respect to the historical record/distribution. In addition to a time series of `mean` SFED values for each day & admin unit, we have proposed providing:
+
+1.  Return period estimations per row.
+2.  Historical baseline estimates per row.
+
+Below is a blank template of what is proposed for the tabular data set.
 
 ```{r}
 df_proposed_template <- tibble(
@@ -70,7 +83,7 @@ df_proposed_template <- tibble(
   `SFED (avg)`= NA,
   `Baseline (SFED)` = NA,
   `RP (SFED)`=NA
-  )
+)
 
 df_proposed_template |> 
   pivot_longer(everything(), names_to = "column", values_to = "Description") |> 
@@ -79,44 +92,28 @@ df_proposed_template |>
       column == "Date"~ "Date (daily time-step)",
       column == "Admin (metadata)"~ "Admin 0-2 pcode/en + admin 2 area (km2)",
       column == "SFED (avg)" ~ "Mean SFED Flood Fraction in admin unit",
-      column == "Baseline (SFED)" ~ "Mean SFED historical baseline in admin unit (calculated from baseline raster band)",
-      column == "RP (SFED)"~ "Return period associated with mean SFED value in admin unit"
-      
+      column == "Baseline (SFED)" ~ "Mean SFED historical baseline (based on last 10 years)",
+      column == "RP (SFED)"~ "Return period associated with mean SFED value"
     )
   ) |> 
   reactable()
 
 ```
 
-## RPs, Anomalies, Seasonality - General
-
-Section probably belongs in `Discussion` section, but as it is more conceptual, putting it here for now.
-
-While this document mainly dives into the technical aspects of RP calculation methodologies, I think it is worth revisiting the goal of RP column for the end-user and there ideal interpretation/use. I think this could ultimately effect the methodology used and or decision to include, exclude/adjust, or supplement the RP column.
-
-RP typically is used to understand extreme event levels with respect to there probability of occurrence. For example, "First Street’s data suggests that 17.7 million properties nationwide are at risk in a 100-year event." This means that 17.7 million properties would be at risk if a storm level is as high as one that typically occurs every 100 years and has 1 % chance of occurring any given year. 
-
-You will notice that seasonality is not really built into the typical use (example above) and definition of RP levels as it often is with other anomalies as it makes the interpretation a bit less useful. We **do** build in seasonality in RP based thresholds for certain AA work to assign risk/probabilities for certain monthly windows. Additionally the integration of seasonality as an metric in the simplified FloodScan data does make sense so that we can better flag out-of-season anomalies (potentially more flash flood type events)
-
-This being said, let's play-out a made up scenario where we calculate RP from a smaller defined window of 10 days:
-
-Calculating FloodScan RP for today, 17 September: we would calculate the RP based on only historical data from 12 September - 22 September and get a RP value. Let's pretend the result is 5 year RP level event. So the interpretation is: "Sep 17 had a flood fraction level of 1 in 5 years for the dates of 12-22 September." While I could see this being useful to a very niche AA use-cause for a technical audience (like our team), I seems like a big stretch for a more general less tehcnical and most likely just confounds the general use & definition of RPs. 
-
-To include a seasonal component include an `anomaly`  column. There are many options, absolute, percent, or even percentiles anomaly (which is intimately related to RP). So we would say September 17 rainfall was greater than 75% of all rainfall values for this time of year (12-22 September). I know it is in a way the same thing, but seems cleaner and somehow in my mind aligns better with how people typically report anomalies.
-
+This document explores methods to calculate return periods and return values and was originally based upon [this proposal](https://docs.google.com/document/d/1PTSqCjW0vFjrht9GwkUbMTopbJ5ONwJBjMgpLDvpWnI/edit).
 
 ### RP Methods Covered
 
-This document is mainly written to explore various options/methods for this calculation to provide a basis for a decision. While flood fraction is a unique case, these decisions also relate to general team discussions around standardizing return period calculations where possible.
+This document explores various options/methods for the calculation to provide a basis for a decision. While flood fraction is a unique case, these decisions also relate to general team discussions around standardizing return period calculations where possible.
 
-There are various methods to calculate return period levels which include both empirical and and distribution based methods. Here are the methods explored in this document.
+There are various methods to calculate return period levels which include both empirical and distribution based methods. Here are the methods explored in this document.
 
-1. **Empirical methods**
-- Percentile methods
-2. **Probability distribution based methods**
-- Generalized Extreme Value (GEV) distribution 
-- Gumbel Distribution (EVI)
-- Log-Pearson type 3 (LP3) 
+1.  **Empirical methods**
+2.  **Probability distribution based methods**
+
+-   Generalized Extreme Value (GEV) distribution (@sec-GEVFormula)
+-   Gumbel Distribution (EVI) (@sec-GumbelFormula)
+-   Log-Pearson type 3 (LP3) (@sec-LP3Formula)
 
 ```{r}
 #' grouped_quantile_summary
@@ -163,12 +160,11 @@ df_zonal <- arrow$read_parquet(tf) |>
   clean_names()
 
 
-rps_test <- c(2:20)
+rps_test <- c(2:28)
 
 
 ```
 
-# Empirical Methods
 
 ```{r}
 df_year_max <- df_zonal |>
@@ -177,7 +173,7 @@ df_year_max <- df_zonal |>
   ) |>
   # didn't want to go through 2024 since year is not finished so
   # chose an arbitraty cutoff date
-  filter(year_date <= "2020-12-31") |>
+  filter(year_date <= "2023-12-31") |>
   group_by(
     adm1_en, adm1_pcode, year_date
   ) |>
@@ -186,6 +182,908 @@ df_year_max <- df_zonal |>
     .groups = "drop"
   )
 
+
+```
+
+# Method Comparison
+
+Here we compare all the methods to eachother. The [`{extRemes}`](https://cran.r-project.org/web/packages/extRemes/index.html) package is used to model the GEV and Gumbel distribution fits. The LP3 distribution is first fit following the instructions in this [video](https://www.youtube.com/watch?v=HD2tEZw18EE) (adapted to R code). We then fit the LP3 distribution to the data using L-moments using the [`{lmom}`](https://cran.r-project.org/web/packages/lmom/index.html) R package to compare the LP3 results.
+
+```{r}
+#' lp3_params
+#'
+#' @param x `numeric` vector
+#' @param imputation_method `character` method to impute zeros when/if present in the maxima dataset
+#'     These are pretty rare, because by taking the `max()` per year we usually end up w/ non-zero values when
+#'     aggregated. Nonetheless, it will happen. Current (and only) option is set to `lowest` which will replace a true 0
+#'     value with the next lowest number. **Note** this produces a warning message when creating the empirical linear
+#'     linear interpolation functions downstream as it will trim the pairs to unique values.
+#'
+#' @return list containing parameters needed for log pearson type III distribution calculations
+#' @details:
+#' Video link with methodology details shared by John (AER)
+#' log-pearson III
+#' fits extreme values/flooding/discharge very well
+#' recommendation from USGS: https://www.youtube.com/watch?v=HD2tEZw18EE
+
+lp3_params <- function(x, imputation_method = "lowest"){
+  if(imputation_method == "lowest"){
+    x[x==0]<- min(x[x!=0])
+  }
+  x_log = log10(x)
+  list(
+    mu = mean(x_log),
+    sd = sd(x_log),
+    g = moments::skewness(x_log)
+  )
+}
+lp3_rp_level <- function(x,return_period){
+  params <- lp3_params(x=x)
+  g <-  params$g
+  mu <- params$mu
+  stdev <- params$sd
+  
+  rp_exceedance <- 1 / return_period
+  q_rp_norm <- qnorm(1 - rp_exceedance, mean = 0, sd = 1)  # Normal quantiles
+  k_rp <- (2/g)*(((q_rp_norm-(g/6))*(g/6)+1)^3-1)  # Skewness adjustment
+  y_fit_rp <- mu + k_rp * stdev  # Fitted values for return periods
+  quantiles_rp <- 10^y_fit_rp 
+  quantiles_rp
+}
+
+
+exceedance_prob <- function(x){
+  x_sorted <-  sort(x, decreasing = TRUE)
+  x_length <-  length(x_sorted)
+  rank = 1:x_length
+  exceedance_prob <-  rank /(x_length+1)
+  orig_order <- order(x, decreasing = TRUE)
+  inv_orig_order <- order(orig_order)
+  exceedance_prob[inv_orig_order]
+}
+```
+
+```{r}
+rps_interp <- c(1.1,2:27)
+rps_interp_extrap <- c(rps_interp,28:101)
+
+df_yearly_max_w_exceedance <-  df_year_max |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  mutate(
+    # value = ifelse(value ==0,min(value[value !=0]),value),
+    exceedance_probability  =exceedance_prob(value),
+    RP = 1/ exceedance_probability
+  ) |> 
+  ungroup()
+
+
+# For empirical we just have the calculated RPs from the values of the 
+# yearly max data set so we use these to create interpolation functions
+# warning is okay
+df_empirical_linear_func <-  df_yearly_max_w_exceedance |> 
+  group_by(
+    adm1_en,adm1_pcode
+    ) |> 
+  summarise(
+    calc_empirical_rp_level = list(approxfun(RP, value,method = "linear", rule =2,yright =Inf)),
+    calc_empirical_rp = list(approxfun( value,RP,method = "linear",rule =2)),
+    .groups= "drop"
+  )
+
+# For LP3 method we can use formula to calculate RP levels
+df_lp3_rps <- df_yearly_max_w_exceedance |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  reframe(
+    RP = rps_interp_extrap,
+    RP_level =lp3_rp_level(x= value, return_period = rps_interp_extrap)
+    
+  ) |> 
+  ungroup()
+
+
+
+# and then use that to create the linear interpolation functions
+df_LP3_linear_funcs <- df_lp3_rps |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  summarise(
+    calc_lp3_rp_level = list(
+      approxfun(
+        x = RP,
+        y =RP_level,
+        method = "linear", rule = 2
+      )
+    ),
+    calc_lp3_rp = list(
+      approxfun(
+        x = RP_level,
+        y =RP,
+        method = "linear", rule = 2
+      )
+    ),
+    .groups = "drop"
+  ) 
+
+# lets tidy up interp func dfs into one data.frame. We now have interpolation functions
+# for each admin and can go in either direction RP->value, value->RP. For LP3 we only really
+# need to interpolation to go from value->RP as RP->value is handled by the formula
+
+df_linear_interp_funcs <- df_empirical_linear_func |> 
+  left_join(df_LP3_linear_funcs, by = c("adm1_en","adm1_pcode")) 
+```
+
+```{r}
+df_lp3_empirical_rp_values <- df_linear_interp_funcs |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  reframe(
+    RP_empirical = rps_interp_extrap,
+    value_empirical = map_dbl(RP_empirical,calc_empirical_rp_level),
+    # these values are exactly the same as already calculated in `df_lp3_rps` so this
+    # step is redundant, but will pack it in here anyways
+    value_LP3 = map_dbl(RP_empirical,calc_lp3_rp_level),
+    RP_LP3_calc = map_dbl(value_empirical,calc_lp3_rp)
+    ) |> 
+  mutate(
+    RP_diff = RP_LP3_calc-RP_empirical 
+  )
+
+```
+
+## LP3, Gumbel, GEV, Empirical
+
+```{r}
+df_modeled <- df_yearly_max_w_exceedance |> 
+  group_by(
+    adm1_en, adm1_pcode
+  ) |> 
+  mutate(
+    value = if_else(value ==0, min(value[value>0]),value) 
+  ) |> 
+  summarise(
+    fevd_gev = list(fevd(value, type = "GEV")),
+    fevd_gumbel = list(fevd(value, type = "Gumbel",threshold = 0))
+  )
+
+
+df_gev_gumbel <- df_modeled |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  reframe(
+    RP =rps_interp_extrap,
+    value_GEV = as.numeric(return.level(fevd_gev[[1]], rps_interp_extrap)),
+    value_Gumbel = as.numeric(return.level(fevd_gumbel[[1]], rps_interp_extrap)),
+  )
+
+
+df_all_rp_values <- df_lp3_empirical_rp_values |> 
+  left_join(
+    df_gev_gumbel, by = c("adm1_en","adm1_pcode", "RP_empirical"= "RP")
+  ) 
+```
+
+```{r}
+#| fig.height: 8
+
+cpal <- c(
+  empirical = hdx_hex("tomato-hdx"),
+  LP3 = hdx_hex("mint-hdx"),
+  GEV = hdx_hex("sapphire-hdx"),
+  Gumbel = "black"
+)
+df_all_rp_values |> 
+  filter(value_empirical < Inf) |> 
+  pivot_longer(cols = starts_with("value_")
+  ) |> 
+  mutate(
+    label = str_remove(name,"value_")
+  ) |> 
+  ggplot(
+    aes(
+      x= RP_empirical, 
+      y= value,
+      color = label, 
+      group = label)
+  ) + 
+
+  geom_line(alpha=0.3) +
+  geom_point(alpha =0.2, size=1.3) +
+  scale_color_manual(values=cpal)+
+  facet_wrap(~adm1_en, scales = "free_y")+
+  scale_x_continuous(
+    breaks = seq(2,28,2)
+  )+
+  scale_y_continuous(
+    labels =scales::label_percent(),
+  )+
+  labs(
+    title = "Comparison of RP Level Calculation Methods Across Historical Range",
+    subtitle = "AER FloodScan SFED: Somalia - Admin 1 Aggregations",
+    x = "Return Period",
+    y = "%",
+  )+
+  theme(
+    legend.title = element_blank(),
+    title = element_text(size = 10),
+    axis.text = element_text(size=7),
+    axis.text.x = element_text(angle = 90),
+    strip.text = element_text(size = 8)
+  )
+```
+
+```{r}
+#| fig.height: 8
+
+df_all_rp_values |> 
+  filter(value_empirical >= Inf) |> 
+  pivot_longer(cols = starts_with("value_")
+  ) |> 
+    mutate(
+    label = str_remove(name,"value_")
+  ) |> 
+  filter(
+    name != "value_empirical"
+  ) |> 
+  ggplot(
+    aes(
+      x= RP_empirical, 
+      y= value,
+      color = label, 
+      group = label)
+  ) + 
+
+  geom_line(alpha=0.2) +
+  geom_point(alpha =0.2, size =1) +
+  scale_color_manual(values= cpal)+
+  
+  facet_wrap(~adm1_en, scales = "free_y")+
+  scale_x_continuous(
+    breaks = seq(30,100, by =10)
+  )+
+  scale_y_continuous(
+    labels =scales::label_percent(),
+  )+
+  labs(
+    title = "Comparison of RP Level Calculation Methods Outside of Historical Range",
+    subtitle = "AER FloodScan SFED: Somalia - Admin 1 Aggregations",
+    x = "Return Period",
+    y = "%",
+  )+
+  theme(
+    legend.title = element_blank(),
+    axis.text = element_text(size=7),
+    title = element_text(size = 10),
+    axis.text.x = element_text(angle = 90),
+    strip.text = element_text(size = 8)
+  )
+  
+```
+
+## LP3 vs Empirical
+
+"According to the U.S. Water Advisory Committee on Water Data (1982), the Log-Pearson Type III Distribution is the recommended technique for flood frequency analysis" [OSU](https://streamflow.engr.oregonstate.edu/analysis/floodfreq/)
+
+```{r}
+#| fig.height: 8
+
+df_lp3_empirical_historical_range_long <- df_lp3_empirical_rp_values |> 
+  filter(value_empirical < Inf) |> 
+  pivot_longer(cols = value_empirical:value_LP3) |> 
+  mutate(
+    label = str_remove(name,"value_")
+  ) 
+
+
+
+df_lp3_empirical_historical_range_long |> 
+  ggplot(
+    aes(
+      x= RP_empirical, 
+      y= value,
+      color = label, 
+      group = label)
+  ) + 
+  geom_line() +
+    geom_point(alpha =0.2) +
+  facet_wrap(~adm1_en, scales = "free_y")+
+  scale_color_manual(values = cpal)+
+  scale_x_continuous(
+    breaks = seq(2,28,2)
+  )+
+  scale_y_continuous(
+    labels =scales::label_percent(),
+  )+
+  labs(
+    title = "RP Calculations (FloodScan SFED) LP3 vs Empirical method",
+    subtitle = "Somalia - Admin 1 Aggregations",
+    x = "Return Period",
+    y = "%",
+  )+
+  theme(
+    legend.title = element_blank(),
+    axis.text =element_text(size=7),
+    axis.text.x = element_text(angle = 90),
+    strip.text = element_text(size = 8)
+  )
+```
+
+```{r}
+#| fig.height: 9
+
+trans_factor <- 2.5
+
+df_lp3_empirical_rp_values |> 
+  filter(value_empirical < Inf) |> 
+  ggplot(
+    aes(x= RP_empirical, y= RP_LP3_calc)
+  )+
+  geom_point()+ 
+  geom_line()+
+  facet_wrap(~adm1_en,scales="free")+
+  labs(x= "Empirical RP", y = "LP3 RP")+
+    geom_bar(
+    aes(x = RP_empirical ,
+        y= RP_diff*trans_factor), 
+        stat= "identity",
+        alpha = 0.3
+  )+
+  geom_abline(
+    slope = 1, color = "red", linetype ="dashed"
+  )+
+  scale_x_continuous(
+    breaks = seq(2,28,2),
+  )+
+  scale_y_continuous(
+    # breaks = seq(2, 66, by = 2),
+    sec.axis = sec_axis(
+      transform=~./trans_factor, 
+      name = "Difference in RPs (Residuals)", 
+      # breaks = seq(2, 26, by = 2)
+      )
+  ) +
+  labs(
+    title = "Return Period Comparison: What LP3 RP Corresponds to an Empiricaly Calculated RP?",
+    subtitle  = "Somalia Admin 1 Aggregations",
+    caption = "Bars represent residulat from perfect 1:1 fit (differece from value and red dashed line)"
+  )+
+   theme(
+     text = element_text(),
+     axis.text = element_text(size=7),
+     title = element_text(size = 8),
+     axis.text.x = element_text(angle =90),
+     strip.text = element_text(size = 8)
+   )
+```
+
+## LP3 Method Comparison
+
+Below we compare the "manual" calculation implemented following the instructions available in the Youtube video to an implementation using L-moments where we calculate the LP3 CDF function and then the RP and RP values with help from the `{lmom}` R package.
+
+The results are very similar and we believe either approach can be justified.
+
+```{r}
+#| eval: true
+
+# Function to calculate LP3 parameters and return periods
+lp3m_params <- function(x) {
+  fit <- lmom::samlmu(x, sort.data = TRUE)
+  params <- lmom::pelpe3(fit)
+  return(params)
+}
+
+lp3m_rp <- function(x,params){
+  p_lte = lmom::cdfpe3(
+    x= x, 
+    para = params
+  )
+  p_gte = 1- p_lte
+  rp = 1/p_gte
+  rp
+}
+    
+
+df_lmom_params <- df_year_max |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  summarise(
+    params = list(lp3m_params(value))
+  ) 
+  
+  
+df_lmom_rp <- df_lmom_params |> 
+  left_join(
+    df_zonal |> 
+      group_by(adm1_en, adm1_pcode) |>
+      summarise(
+        date = list(date),
+        value = list(value)
+      )
+  ) |> 
+  mutate(
+    lmom_rp = list(lp3m_rp(x= unlist(value), para = unlist(params)))
+      ) |> 
+  select(starts_with("adm1_"), date, value, lmom_rp) |> 
+  unnest(
+    c(date, value, lmom_rp)
+  )
+
+# df_zonal_all_rps |> 
+#   left_join(
+#     df_lmom_rp
+#   ) |> 
+#   select(adm1_en, adm1_pcode, date, value, rp_lp3, lmom_rp) |> 
+#   mutate(
+#     diff = lmom_rp - rp_lp3
+#   ) |> 
+#   group_by(adm1_en, adm1_pcode) |> 
+#   summarise(
+#     avg_diff = mean(diff)
+#   ) |> 
+#   ggplot(
+#     aes(x= adm1_en, y= avg_diff)
+#   )+
+#   geom_bar(stat= "identity")+
+#   scale_y_continuous(labels = scales::label_comma())+
+#   coord_flip()
+```
+
+```{r}
+#| fig.height: 8
+
+lp3m_rv <- function(x, return_periods){
+  fit <- lmom::samlmu(x, sort.data = T)
+  params <- lmom::pelpe3(fit)
+  exceedance_probs <-  1-(1/return_periods)
+  lmom::quape3(f= exceedance_probs, para = params)
+}
+
+
+df_lp3m_rv <- df_year_max |> 
+  group_by(
+    adm1_en, adm1_pcode
+  ) |> 
+  reframe(
+    RP = rps_interp_extrap,
+    RV = lp3m_rv(
+    x= value,
+    return_period = rps_interp_extrap
+    ),
+    method = "LP3 Moments"
+  )
+
+
+df_all_rp_values2 <- df_all_rp_values |> 
+  left_join(
+    df_lp3m_rv |> 
+      rename(
+        `value_LP3 (moments)` = RV
+      ),
+    by = c("adm1_en","adm1_pcode","RP_empirical"= "RP")
+  ) 
+
+# df_all_rp_values2 |> 
+#   ggplot(aes(x= value_LP3, y= `value_LP3 (moments)`, color = adm1_en))+
+#   geom_point()
+df_all_rp_values2 |>
+  select(starts_with("adm"),RP_empirical, contains("value_LP")) |> 
+  pivot_longer(
+    cols = contains("value_LP"),
+  ) |> 
+  mutate(
+    label  = if_else(name == "value_LP3", "LP3 (manual)", "LP3 (L-moments)")
+  ) |> 
+  ggplot(
+    aes(x= RP_empirical, y= value, color =label)
+  )+
+    geom_line(alpha=0.2) +
+  geom_point(
+    alpha =0.2,
+    size =1) +
+  facet_wrap(~adm1_en)+
+  labs(
+    title = "LP3 Method Comparison: Manual vs L-Moments",
+    subtitle = "FloodScan: Somalia Admin 1 Aggregations",
+    x = "Return Period",
+    y= "Return Value"
+    
+    
+  )+
+  theme(
+        legend.title = element_blank(),
+    axis.text =element_text(size=7),
+    axis.text.x = element_text(angle = 90),
+    strip.text = element_text(size = 8)
+  )
+  
+```
+
+# Example of Admin 1 Stats
+
+To give an example of what the admin tabular data would look like, below we show a subset of one administrative zones tabular data.
+
+```{r}
+#' i can clean this up and remove the dplyr chain as we've already functionalized it
+# https://github.com/OCHA-DAP/pa-anticipatory-action/blob/d17031d61612d64e38787fa158dc4fe1660f7379/src/utils_general/statistics.py
+df_empirical_funs <- df_year_max |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  arrange(desc(value),.by_group = T) |> 
+  mutate(
+    rank = row_number(),
+    exceedance_probability = rank / (n() + 1),
+    rp = 1 / exceedance_probability
+  ) |> 
+  summarise(
+    rp_fun = list(approxfun(value, rp, rule = 2)),
+    rv_fun = list(approxfun( rp,value, rule = 2)),
+    .groups = "drop"
+  )  
+# df_year_max |> 
+#   group_by(adm1_en,adm1_pcode) |>
+#   mutate(
+#     exceedance_probability = exceedance_prob(x = value),
+#     rp = 1 / exceedance_probability
+#   ) 
+#   
+
+rps_interp_backwards <- seq(1,1000, by =0.01)
+
+df_lp3_rps <- df_yearly_max_w_exceedance |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  reframe(
+    RP = rps_interp_backwards,
+    RP_level =lp3_rp_level(x= value, return_period = rps_interp_backwards)
+    
+  ) |> 
+  ungroup()
+
+df_LP3_linear_funcs <- df_lp3_rps |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  summarise(
+    calc_lp3_rp_level = list(
+      approxfun(
+        x = RP,
+        y =RP_level,
+        method = "linear", rule = 2
+      )
+    ),
+    calc_lp3_rp = list(
+      approxfun(
+        x = RP_level,
+        y =RP,
+        method = "linear", rule = 2
+      )
+    ),
+    .groups = "drop"
+  ) 
+
+
+df_funcs <- df_modeled |> 
+  left_join(
+    df_LP3_linear_funcs
+  ) |> 
+  left_join(
+    df_empirical_funs |> 
+      rename(
+        calc_empirical_rp = "rp_fun",
+       
+      )
+      )
+
+
+
+df_zonal_all_rps_nested <- df_funcs |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  mutate(
+    gev_params =list(fevd_gev[[1]]$results$par),
+    gumbel_params =list(fevd_gumbel[[1]]$results$par),
+  ) |> 
+  left_join(
+    df_zonal |> 
+      group_by(adm1_en,adm1_pcode) |> 
+      summarise(
+        date= list(date),
+        value = list(value)
+      )
+  ) |> 
+  select(
+    adm1_en,adm1_pcode, gev_params, gumbel_params,calc_lp3_rp, calc_empirical_rp,date, value
+  ) |> 
+  mutate(
+    rp_gev = list(
+      map(value,
+          \(x){
+            exceedance = 1-pevd(x, 
+                                loc = unlist(gev_params)["location"],
+                                scale = unlist(gev_params)["scale"],
+                                shape = unlist(gev_params)["shape"],
+                                type = "GEV")
+            as.numeric(1/exceedance)
+          }) |> 
+        unlist()
+    ),
+    rp_gumbel = list(
+      map(value,
+          \(x){
+            exceedance = 1-pevd(x, 
+                                loc = unlist(gev_params)["location"],
+                                scale = unlist(gev_params)["scale"],
+                                type = "Gumbel")
+            as.numeric(1/exceedance)
+          }) |> 
+        unlist()
+    ),
+    rp_lp3 = list(map(value,  calc_lp3_rp) |> unlist()),
+    rp_empirical = list(map(value,  calc_empirical_rp) |> unlist()),
+  )
+
+df_zonal_all_rps <- df_zonal_all_rps_nested |> 
+  unnest(cols = c(date, value, rp_gumbel,rp_gev,rp_lp3,rp_empirical))
+
+```
+
+```{r}
+box::use(zoo)
+df_zonal_smooth <- df_zonal_all_rps |> 
+  select(date,adm1_en,adm1_pcode ,value) |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  arrange(date) |> 
+  mutate(
+    doy = yday(date),
+    value_20 = zoo$rollmean(x = value, k = 20,align = "center", fill = NA)
+  ) |>
+  ungroup()
+  
+
+df_zonal_baseline_static <- df_zonal_smooth |> 
+  group_by(adm1_en, adm1_pcode, doy, .add = TRUE) |> 
+  summarise(
+    sfed_baseline_static = mean(value_20, na.rm = TRUE),
+  )
+
+max_date <- df_zonal_smooth$date |> max()
+start_date = max_date - years(10)
+
+df_zonal_baseline10 <- df_zonal_smooth |> 
+  ungroup() |> 
+  filter(
+    date %in% seq(start_date, max_date, by ="day")
+  ) |> 
+  group_by(adm1_en, adm1_pcode, doy, .add = TRUE) |> 
+  summarise(
+    sfed_baseline10 = mean(value_20, na.rm = TRUE),
+  )
+
+
+df_adm_zonal_subset <- df_zonal_all_rps |> 
+  mutate(
+    doy = yday(date)
+  ) |> 
+  ungroup() |> 
+  filter(
+    adm1_en == "Awdal"
+  ) |> 
+  select(doy,date,adm1_en,adm1_pcode , `SFED (avg)` = value, `SFED (RP)`= rp_lp3)
+
+df_adm_zonal_subset_table <- df_adm_zonal_subset |> 
+  left_join(
+    df_zonal_baseline_static)|> 
+  left_join(
+    df_zonal_baseline10
+  )|> 
+  select(-doy,- sfed_baseline_static) |> 
+  rename(
+    `SFED (baseline)` = sfed_baseline10
+  ) |> 
+  relocate(`SFED (baseline)`, .after = `SFED (avg)`)
+
+reactable(
+  df_adm_zonal_subset_table,
+  columns = list(
+  `SFED (avg)` = colDef(format = colFormat(percent = FALSE, digits = 5)),    
+  `SFED (baseline)` = colDef(format = colFormat(percent = FALSE, digits = 4)),    
+  `SFED (RP)` = colDef(format = colFormat(percent = FALSE, digits = 3))    
+  )
+)
+```
+
+Most The resulting historical data set is strongly skewed towards 1. So much that you cannot really see the distribution above 1 even when log scaled. Therefore, below we show a distribution plot of all historical RP values **above 1.5** using the different methods.
+
+```{r}
+#| fig.height: 8
+
+df_zonal_all_rps |> 
+  ungroup() |> 
+  select(adm1_en,adm1_pcode, date, starts_with("rp_")) |> 
+  pivot_longer(
+    cols =starts_with("rp_")
+  ) |> 
+  filter(value>1.5) |> 
+  ggplot(
+  )+ 
+  
+  ggridges$geom_density_ridges(
+    aes(x= value, y= name, group= name,fill =name),
+    alpha= 0.5,
+    scale =10
+  )+
+  facet_wrap(~adm1_en)+
+  scale_x_log10(breaks= c(1,10,100,500))+
+  theme(
+     text = element_text(),
+     axis.text = element_text(size=7),
+     title = element_text(size = 8),
+     legend.title = element_blank(),
+     axis.text.x = element_text(angle =90),
+     strip.text = element_text(size = 8)
+  )
+  
+```
+
+```{r}
+#| eval: false
+
+df_zonal_all_rps |> 
+  ggplot(
+    aes(x= rp_gumbel, y= rp_gev)
+  )+
+    facet_wrap(~adm1_en,scales= "free")+
+  geom_point(size= 1)+
+  theme(
+    panel.background = element_rect(fill=NA,color="grey"),
+    legend.title = element_blank(),
+    legend.text = element_text(size =7),
+    strip.text = element_text(size = 8),
+    axis.text = element_text(size = 8, angle =90)
+  )
+```
+
+# Discussion
+
+**TBD**
+
+-   "According to the U.S. Water Advisory Committee on Water Data (1982), the Log-Pearson Type III Distribution is the recommended technique for flood frequency analysis" [OSU](https://streamflow.engr.oregonstate.edu/analysis/floodfreq/)
+-   Can make a final decision on LP3 method (moments vs conventional)
+-   Should decide on imputation method for when 0 is present in the data. It's not that common because we take the annual maxima first, but will occur. In current analysis we are just imputing with second the lowest value.
+
+# Appendix
+
+## Formulas
+
+### Gumbel Formula {#sec-GumbelFormula}
+
+CDF
+
+$$
+f(x) = \frac{1}{\beta} \exp\left(- \left( \frac{x - \mu}{\beta} \right) - \exp\left(- \frac{x - \mu}{\beta} \right) \right)
+$$ PDF
+
+$$
+F(x) = \exp\left( - \exp\left( - \frac{x - \mu}{\beta} \right) \right)
+$$
+
+### GEV Formula {#sec-GEVFormula}
+
+CDF
+
+$$
+F(x) = \exp\left( - \left( 1 + \xi \frac{x - \mu}{\beta} \right)^{-1/\xi} \right), \quad 1 + \xi \frac{x - \mu}{\beta} > 0
+$$
+
+PDF
+
+$$
+f(x) = \frac{1}{\beta} \left( 1 + \xi \frac{x - \mu}{\beta} \right)^{-1 - 1/\xi} \exp\left( - \left( 1 + \xi \frac{x - \mu}{\beta} \right)^{-1/\xi} \right)
+$$
+
+### LP3 RP Formula {#sec-LP3Formula}
+
+$$ 
+X_T = 10^{\left( \mu + \frac{2}{g} \left( \left( \frac{Z_T - \frac{g}{6}}{\frac{g}{6}} + 1 \right)^3 - 1 \right) \cdot \sigma \right)}
+$$
+
+**Where:**
+
+-   $X_T$ is the quantile for the return period $T$,
+-   $\mu$ is the mean of the log-transformed data,
+-   $\sigma$ is the standard deviation of the log-transformed data,
+-   $g$ is the skewness of the log-transformed data,
+-   $Z_T$ is the standard normal quantile corresponding to the exceedance probability $P_T = \frac{1}{T}$.
+
+
+## Filtering out low-duration peaks
+
+**TBD**
+
+There was a suggestion to filter out low duration peaks (< 2 or 3days) before running RP calculation. I started thinking about this, but not sure how to implement it in a way that would be generalization or how necessary it is. Some thoughts:
+
+It's the max values per year/admin that we are concerned with as those are the input for the RP calculations, but we don't currently have an algorithm picked out that would generalize well to this across thousands of admin 2 units. I thought through some possibilities below, and so far think it's overly complicated and would cause problems with an automated pipeline for a variety of reasons:
+
+1. We don't have a threshold that constitutes whether or not a peak is sustained.
+2. It would be a cause for concern if the max peak days per year were false positives. I could imagine false positive noise scattered through the time series, but would think if they were high enough to create a yearly maxima that would indicate some more systemic issue?
+2. Using a n-day average to calculate the max peak per year would dampen the effect of extreme daily value which could be real, especially in flash flood scenarios which FloodScan does seem to pick up well in some contexts? Also it could be confusing if the admin stats are provided at daily time-steps, but the RP calculations is based on n-day average value.
+
+Theoretically we could attempt something like the below (but just writing it out seems problematic):
+
+1. Take the take an n-day (3 day?) rolling centered mean across the time series smooth the values.
+2. calculate the max **daily** value per year + admin, **max n-day mean** value per year + admin
+3. We could then see if the n-day max value aligns with the max 3-day mean value. We could say it does if they are with **n** (5?) days of each other. If they are not, we could use the next highest daily peak that DOES align with the smoothed peak. 
+    + Seems problematic as the appropriate **n** could change based on admin. There will be a large number of admin + year combinations that will be very flat with almost all 0 values.
+    + additionally there will be many instances when the same exact max value occurs more than 1x per year. For simple unfiltered RP calculation this is fine, but when trying to consider if either are not a sustained peak it adds a complication.
+
+
+
+```{r}
+#| eval: false 
+
+
+temporal_intersect <- function(x, y,n) {
+  map_lgl(x, function(d1) {
+    any(map_lgl(y, ~ abs(difftime(.x, d1, units = "days")) <= n))
+  })
+}
+
+df_zonal |> 
+  group_by(
+    adm1_en, adm1_pcode, yr_date = floor_date(date,"year")
+  ) |> 
+  # filter(year(date) %in% c(2021)) |> 
+  mutate(
+    lgl_max_value = value == max(value),
+    value_3 = zoo$rollmean(x = value, k = 3,align = "center", fill = 0),
+    lgl_max_value3 = value_3 == max(value_3),
+    date_max_value = list(date[lgl_max_value]),
+    date_max_value_3 = list(date[lgl_max_value3]),
+    # matches = map2(date_max_value, date_max_value_3, \(x,y){temporal_intersect(x,y,5)}) 
+  )
+  ) |> 
+  filter(max_value)
+  
+  ggplot(
+    aes(x= date,
+        y= value,
+        color = max_value
+        # alpha= max_value, 
+        # size = max_value
+        )
+  )+
+  geom_point()+ 
+  facet_wrap(~adm1_en)
+  
+```
+
+
+## RPs & Seasonality - General {#sec-seasonality}
+
+It was decided not to build seasonality into the RP calculations and rather handle this component in our baseline calculations which the user can use to better understand seasonal anomalies. Nonetheless, I've tried to summarize some of the discussions/thinking below.
+
+We were originally wondering whether it would make sense to incorporate seasonality into RP calculations. Therefore, rather than taking annual maxima for the entire year one could choose the window of interest i.e July-Sep and take the maxima from that range per year. We often do this when designing Anticipatory Action (AA) framework thresholds to assign risk/probabilities for certain windows/seasons. The benefit of adding seasonality to the RP metric in the simplified FloodScan data would be that it would identify out-of-season anomalies (potentially more flash flood type events).
+
+RP typically is used to understand extreme event levels with respect to there probability of occurrence. For example, "First Street’s data suggests that 17.7 million properties nationwide are at risk in a 100-year event." This means that 17.7 million properties would be at risk if a storm level is as high as one that typically occurs every 100 years and has 1 % chance of occurring any given year.
+
+You will notice that seasonality is not typically built into the example above which is the a pretty standard use-case. So let's see how the communication/interprtation wouuld change if we play out a hypothetical scenario where we calculate RP from a smaller defined window of 10 days:
+
+Calculating FloodScan RP for today, 17 September: we calculate the RP value based on only historical data from 12 September - 22 September. The "results" is a 1 in 5 year RP level event. The interpretation is: "Sep 17 had a flood fraction level of 1 in 5 years for the dates of 12-22 September." While I could see this being useful to some niche analyses and technical audiences. It's not a simple way to communicate and use the concept of RPs to a more general audience.
+
+Therefore, we think it is better to communicate seasonal outliers with season anomalies which can be calculated by the user from `baseline_avg` value that will be provided.
+
+## Original Questions {#sec-outstanding}
+
+-   what range to to calculate the RP value. The first step in calculating RP values is to take the annual maxima of the data. For seasonal analyses we look for this annual maxima for just the season of interest. In this floodscan product we don't have any inherent seasons of interest, however in the raster product to calculate historical baseline we do apply a smoothing function of `+/-n` days (likely 10). In theory we could recalculate the RP values based on only that window rather than the full year.
+-   Calculations should be based on full year annual maxima\
+-   Utility of RP column especially since most values are 1. Can we calculte values below 1?
+-   Which EVD distribution to use?
+-   LP3 as it is a hydrological standard and performs with FloodScan when compared to Gumbel and GEV
+
+
+```{r}
 df_percentiles <- imap(
   c(
     "percentile - inv empirical"=1,
@@ -210,24 +1108,7 @@ df_percentiles <- imap(
       )
   }
 )
-```
 
-
-
-```{r}
-# https://github.com/OCHA-DAP/pa-anticipatory-action/blob/d17031d61612d64e38787fa158dc4fe1660f7379/src/utils_general/statistics.py
-df_empirical_funs <- df_year_max |> 
-  group_by(adm1_en,adm1_pcode) |> 
-  arrange(desc(value),.by_group = T) |> 
-  mutate(
-    rank = row_number(),
-    exceedance_probability = rank / (n() + 1),
-    rp = 1 / exceedance_probability
-  ) |> 
-  summarise(
-    rp_fun = list(approxfun(rp, value, rule = 2)),
-    .groups = "drop"
-  )  
 
 df_empirical_rank <- df_empirical_funs |> 
   group_by(
@@ -235,17 +1116,14 @@ df_empirical_rank <- df_empirical_funs |>
   ) |> 
   reframe(
     rp = rps_test,
-    q_val = map_dbl(rps_test,rp_fun)
+    q_val = map_dbl(rps_test,rv_fun)
   ) |> 
   mutate(
     type = "Weibell (manual)"
   )
 ```
 
-
 The plots below show that different empirical methods do diverge in there estimation of return period levels depending on the characteristics of the data.
-
-
 
 ```{r plotEmpirical}
 #| fig.height: 8
@@ -267,7 +1145,8 @@ df_empirical |>
   geom_point(alpha = 0.7, size = 1)+
   geom_line()+
   scale_color_brewer(palette = "Set1") +
-  facet_wrap(~adm1_en)+
+  scale_y_continuous(labels =scales$label_percent())+
+  facet_wrap(~adm1_en, scales = "free")+
   theme(
     legend.title = element_blank(),
     legend.text = element_text(size =7),
@@ -275,7 +1154,7 @@ df_empirical |>
   )
 ```
 
-One thing that is not immediately evident from the plot is that the "Weibell (manual) based methodology" is nearly equivalent to the  `quantile()` function used for the rest of the methods when the `type` algorithm is set to 3 which represents the `weibell` formula which is the default method in minitab software. Below is a table looking at the correlation between Weibell manual and `quantile(..., type = 3)`. I am not totally sure why it is not a perfect correlation, but perhaps small differences in interpolation method and rounding.
+One thing that is not immediately evident from the plot is that the "Weibell (manual) based methodology" is nearly equivalent to the `quantile()` function used for the rest of the methods when the `type` algorithm is set to 3 which represents the `weibell` formula which is the default method in minitab software. Below is a table looking at the correlation between Weibell manual and `quantile(..., type = 3)`. I am not totally sure why it is not a perfect correlation, but perhaps small differences in interpolation method and rounding.
 
 ```{r corrTable}
 df_rank_minitab_wide <- df_empirical |> 
@@ -284,7 +1163,6 @@ df_rank_minitab_wide <- df_empirical |>
     names_from = type,
     values_from = q_val
   ) 
-
 
 df_correlation_percentile_vs_manual <- df_rank_minitab_wide |> 
   group_by(adm1_en,adm1_pcode) |> 
@@ -308,461 +1186,191 @@ reactable(df_correlation_percentile_vs_manual,
 
 ```
 
-# Distribution Based Methods
+## Additional Reading to Check out
 
-Here we first calculate the LP3 distribution to estimate rps. Then we use the `{extRemes}` package to implement several distribution based methods. The package makes the following distributions available for fitting: `GEV`, `GP`, `PP`, `Gumbel`, `Exponential`.
-
-Here we use the `{extRemes}` package for `GEV`, `Gumbel` distributions and calculate the Log-Pearson type 3 manually according to this [video](https://www.youtube.com/watch?v=HD2tEZw18EE)
-
-```{r}
-# from John: log-pearson III
-# fits extreme values/flooding/discharge very well
-# recommendation from USGS
-# https://www.youtube.com/watch?v=HD2tEZw18EE
-
-df_pearson <- df_year_max |> 
-  group_by(adm1_en) |> 
-  arrange(adm1_en,desc(value)) |> 
-  mutate(
-    rank =row_number(),
-    n = n(),
-    exceedance_probability = rank / (n() + 1),
-    rp = 1/exceedance_probability,
-    value_log = log10(value),
-    x_bar = mean(value_log),
-    g = moments::skewness(value_log),
-    std = sd(value_log),
-    q_norm = qnorm(1-exceedance_probability, mean =0 , sd =1),
-    k = (2/g)*(((q_norm-(g/6))*(g/6)+1)^3-1),
-    y_fitted = x_bar + k * std,
-    antilog_y = 10^y_fitted,
-  )
-
-p_approx_fun <-  possibly(approxfun,otherwise = NULL)
-df_pearson_funs <- df_pearson |> 
-  group_by(
-    adm1_en
-  ) |> 
-  summarise(
-    interp_fun = list(p_approx_fun(rp, antilog_y, rule = 2))
-  )
-
-df_pearson_fit <- df_pearson_funs |> 
-  filter(adm1_en != "Banadir") |> 
-  group_by(adm1_en) |> 
-  reframe(
-    rp = rps_test,
-    interpolated_value = map_dbl(rps_test,interp_fun),
-    type = "Pearson log III"
-  )
-
-
-df_pearson_backwards <- df_pearson |> 
-  group_by(
-    adm1_en
-  ) |> 
-  summarise(
-    interp_fun = list(p_approx_fun(antilog_y, rp, rule = 2))
-  )
-
-df_pearson_rps <- df_zonal |> 
-  # filter(adm1_en != "Banadir") |> 
-  group_by(
-    adm1_en
-  ) |> 
-  summarise(
-    dates = list(as.character(date)),
-    values = list(value)
-  ) |> 
-  left_join(
-    df_pearson_backwards 
-    )|> 
-  filter(adm1_en != "Banadir") |>
-  group_by(adm1_en) |> 
-  reframe(
-    interpolated_rps = map_dbl(unlist(values),interp_fun),
-    value = unlist(values),
-    date = as_date(unlist(dates)),
-    type = "Pearson log III"
-  )
-```
+- [User's Manual for Program PeakFQ, Annual Flood-Frequency Analysis Using Bulletin 17B Guidelines](https://pubs.usgs.gov/tm/2006/tm4b4/)
+-   [Low flow frequency analysis by L-moments method (Case study: Iranian Central Plateau River Basin)](https://jdesert.ut.ac.ir/article_56480_6eeaa5fc9a6bdc22bbf32ee7764f1cec.pdf)
+-   [The generalized method of moments as applied to problems of flood frequency analysis: Some practical results for the log-Pearson type 3 distribution](https://www.sciencedirect.com/science/article/abs/pii/0022169487900679)
+-   [Flood Frequency Analysis By Gumble & Log Pearson III](https://www.excelcalcs.com/calcs/repository/Fluids/Rainfall/Flood-Frequency-Analysis-By-Gumble-and--Log-Pearson-III/)
+-   [Determination of return period for flood frequency analysis using normal and related distributions](https://iopscience.iop.org/article/10.1088/1742-6596/890/1/012162/pdf)
 
 ```{r}
-# some of the distributions in extRemes don't work in certain admin units due to the variance structure of the data.
-# therefore I wrap in possibly to just return the valid objects rather than an error
-rps_test <- c(2:20)
-rl_possibly <- purrr::possibly(
-  .f = extRemes::return.level,
-  otherwise = NULL
-)
+#| eval: false
 
-# Modify rl_vec to accept the fevd object and return the return levels directly
-rl_vec <- function(fevd_fun, return.period,type) {
-  rl <- rl_possibly(fevd_fun, return.period = return.period,type =type)
-  if (!is.null(rl)) {
-    return(rl)  # Return the vector of return levels
-  } else {
-    return(rep(NA, length(return.period)))  # Return NA for each period if it fails
-  }
+
+# Function to calculate return period based on daily value
+calculate_return_period <- function(x, params) {
+  # Calculate the exceedance probability for the given value
+  exceedance_prob <- 1 - lmom::quape3(f = x, para = params)
+  return(1 / exceedance_prob)  # Return period is the inverse of exceedance probability
 }
 
-
-df_fevd <- df_year_max |> 
-  group_by(
-    adm1_en, adm1_pcode
-  ) |> 
+# Step 1: Calculate L-moments parameters from annual maxima
+annual_max_params <- df_year_max |> 
+  group_by(adm1_en) |> 
   summarise(
-    fevd_gev = list(fevd(value, type = "GEV")),
-    fevd_gumbel = list(fevd(value, type = "Gumbel")),
-    # fevd_gp = list(fevd(value, type = "GP")),
-    # fevd_pp = list(fevd(value, type = "PP")),
-    # fevd_exp = list(fevd(value, type = "Exponential")),
-    .groups = "keep"
-  ) |> 
-  left_join(
-    df_pearson_fit |> 
-      group_by(adm1_en) |> 
-      summarise(
-        lp3 = list(interpolated_value)
-      )
-    
-  )
-
-
-
-df_fevd_vals <- df_fevd |> 
-  reframe(
-    RP = rps_test,  # Store return periods as a list
-    GEV = as.numeric(rl_vec(fevd_gev[[1]], rps_test) ),
-    Gumbel = as.numeric(rl_vec(fevd_gumbel[[1]], rps_test)) 
-  ) |> 
-  left_join(
-    df_pearson_fit |> 
-      rename(
-        RP = rp,
-        lp3 = interpolated_value
-      ) |> 
-      select(-type)
-  ) |> 
-  pivot_longer(
-    cols = c(GEV, Gumbel,lp3),
-    names_to = "type",
-    values_to = "value"
-  )
-```
-
-
-```{r plotAll}
-#| fig.height: 10
-
-bind_rows(df_fevd_vals
-) |> 
-  ggplot(
-    aes(x= RP, y= value, color =type)
-  )+
-  geom_point(size =1,alpha =0.4)+
-  geom_line()+
-  facet_wrap(~adm1_en)+
-  scale_color_brewer(palette = "Set1") + 
-  labs(
-    title = "Return Period Methods"
-  )+
-  theme(
-    legend.title = element_blank(),
-    legend.text = element_text(size =7),
-    strip.text = element_text(size = 8)
-  )
-```
-
-## All methods together
-
-```{r}
-#| fig.height: 10
-
-bind_rows(df_fevd_vals,
-          df_empirical |> 
-            rename(
-              RP ="rp",
-              value = "q_val"
-            )
-) |> 
-  ggplot(
-    aes(x= RP, y= value, color =type)
-  )+
-  geom_point(size =1,alpha =0.4)+
-  geom_line()+
-  facet_wrap(~adm1_en)+
-  scale_color_brewer(palette = "Set1") + 
-  labs(
-    title = "Return Period Methods"
-  )+
-  theme(
-    legend.title = element_blank(),
-    legend.text = element_text(size =7),
-    strip.text = element_text(size = 8)
-  )
-```
-
-
-# Admin Zone RP values
-
-## Example of tabular data
-
-Below is an example of tabular data that would be made available available on HDX. You see that the vast majority of return periods are the minimum value of 1.
-
-```{r}
-
-df_dist_fits <- df_year_max |> 
-  group_by(
-    adm1_en, adm1_pcode
-  ) |> 
-  summarise(
-    fevd_gev = list(fevd(value, type = "GEV")),
-    fevd_gumbel = list(fevd(value, type = "Gumbel")),
+    params = list(lp3_params_moments(value)),  # Fit the parameters
     .groups = "drop"
-  ) 
+  )
 
-df_distribution_params <- df_dist_fits |> 
+# Step 2: Calculate return periods for each daily value in df_zonal
+df_zonal_with_rp <- df_zonal |> 
+  left_join(annual_max_params, by = "adm1_en") |> 
   mutate(
-    gev_location = map_dbl(fevd_gev,\(x) x$results$par[["location"]]),
-    gev_shape = map_dbl(fevd_gev,\(x) x$results$par[["shape"]]),
-    gev_scale = map_dbl(fevd_gev,\(x) x$results$par[["scale"]]),
-    gumbel_location = map_dbl(fevd_gumbel,\(x) x$results$par[["location"]]),
-    gumbel_scale = map_dbl(fevd_gumbel,\(x) x$results$par[["scale"]])
-  )
-
-
-df_zonal_rps_gev <- pmap( .l = list(adm1 = df_distribution_params$adm1_en,
-                                    shape = df_distribution_params$gev_shape,
-                                    scale = df_distribution_params$gev_scale, 
-                                    location = df_distribution_params$gev_location),
-                          
-                          .f = \(adm1,shape, scale, location){
-                            
-                            df_zonal_filt <- df_zonal |> 
-                              filter(
-                                adm1_en == adm1
-                              )
-                            
-                            exceedance_probs <- 1-pevd(df_zonal_filt$value, loc = location, scale = scale, shape = shape, type = "GEV")
-                            
-                            
-                            df_zonal_filt$rp <- 1 /exceedance_probs
-                            return(df_zonal_filt)
-                          }      
-                          
-) |> 
-  list_rbind()
-
-df_zonal_rps_gumbel <- pmap(
-  .l = list(adm1 = df_distribution_params$adm1_en,
-            scale = df_distribution_params$gumbel_scale, 
-            location = df_distribution_params$gumbel_location),
-  
-  .f = \(adm1,shape, scale, location){
-    
-    df_zonal_filt <- df_zonal |> 
-      filter(
-        adm1_en == adm1
-      )
-    
-    exceedance_probs <- 1-pevd(df_zonal_filt$value, loc = location, scale = scale, type = "Gumbel")
-    
-    
-    df_zonal_filt$rp <- 1 /exceedance_probs
-    return(df_zonal_filt)
-  }      
-  
-) |> 
-  list_rbind()
-```
-
-
-```{r}
-
-df_zonal_rps_gev_samp <- df_zonal_rps_gev |>
-  filter(adm1_en == "Bakool") |> 
-  rename(
-    `SFED (avg)` = "value"
-  ) |>
-  select(-stat)
-
-reactable(
-  df_zonal_rps_gev_samp,
-  columns = list(
-    `SFED (avg)` = colDef(format = colFormat(percent = FALSE, digits = 3)),
-    rp = colDef(format = colFormat(percent = FALSE, digits = 2))
-  )
-)
-```
-
-This last point is illustrated better by a histogram.
-
-```{r}
-#| fig.height: 3
-
-df_zonal_rps_gev_samp |>
-  ggplot(
-    aes(x = rp)
-  ) +
-  geom_histogram(bins = 200)
-```
-
-The skew is so extreme toward return periods of 1 that it is difficult to see any other data, therefore we log scale both axes.
-
-```{r}
-#| fig.height: 3
-
-df_zonal_rps_gev_samp |>
-  ggplot(
-    aes(x = rp)
-  ) +
-  geom_histogram(bins = 200) +
-  scale_x_log10() +
-  scale_y_log10()
-```
-
-## Gumbel (EVI) vs GEV
-
-So it does appear that the RP values that will be attributed to the daily admin values are quite sensitive to both method and data structure. In many cases they line up and are on the same order of magnitude whereas in others they do not.
-
-```{r}
-#| fig.height: 10
-
-df_evd_probs_long <- df_zonal_rps_gumbel |> 
-  mutate(
-    type = "Gumbel"
-  ) |>
-  bind_rows(
-    df_zonal_rps_gev |>
-      mutate(
-        type = "GEV"
-      )
-  )
-
-df_evd_probs_long |> 
-  pivot_wider(
-    id_cols = c("adm1_en","adm1_pcode","date"),
-    values_from = rp,
-    names_from = type
+    # Calculate the return period for each daily value
+    RP = map2_dbl(value, params, ~ calculate_return_period(.x, .y))
   ) |> 
-  # filter(!is.na(GEV),!is.na(Gumbel)) |>
-  ggplot(
-    aes(x= Gumbel, y = GEV)
-  )+
-  facet_wrap(~adm1_en,scales= "free")+
-  geom_point(size= 1)+
-  theme(
-    panel.background = element_rect(fill=NA,color="grey"),
-    legend.title = element_blank(),
-    legend.text = element_text(size =7),
-    strip.text = element_text(size = 8),
-    axis.text = element_text(size = 8, angle =90)
-  )+
-  labs(
-    title = "Fitted Distribution Matters For Return Period Calculations"
-  )
+  select(adm1_en, date, value, RP)  # Select relevant columns
+
+
+df_zonal_with_rp |> 
+  ggplot(aes(x= RP))+
+  geom_histogram()
 
 ```
 
 ```{r}
-#| fig.height: 10
+#| eval: false
 
-df_distribution_based_long <- bind_rows(
-  df_evd_probs_long,
-  df_pearson_rps |> 
-    rename(
-      rp = interpolated_rps
-    ) |> 
-    mutate(
-      type ="log III pearson"
-    )
-)
-# 
-# df_distribution_based_long |> 
-#   filter(
-#     type == "log III pearson"
-#   ) |> 
-#   count(rp) |> 
-#   print(n=523)
-#   filter(
-#     adm1_en == "Sool"
-#   ) |> 
-#   pivot_wider(
-#     id_cols = c("adm1_en","adm1_pcode","date"),
-#     values_from =c(rp),
-#     names_from = type
-#   ) |> 
-#   print(n=1000)
-
-df_distribution_based_long |> 
-  ggplot(
-    aes(x= value, y= rp, color = type)
-  )+
-  geom_point(alpha =0.4, size =1)+
-  facet_wrap(~adm1_en,scales="free")+
-  labs(
-    title = "RP classification by distribution based method"
-  ) +
-  theme(
-    panel.background = element_rect(fill=NA,color="grey"),
-    legend.title = element_blank(),
-    legend.text = element_text(size =7),
-    strip.text = element_text(size = 8),
-    axis.text = element_text(size = 8, angle =90)
+rps_calc <- c(1,seq(5,100,5))
+df_lp3_rp_levels <- df_year_max |> 
+  group_by(adm1_en) |> 
+  reframe(
+    rp = rps_calc,
+    rp_level = lp3_rps(x= value, return_period = rps_calc),
+    method = "Manual"
+  ) |> 
+  bind_rows(
+    df_year_max |> 
+      group_by(adm1_en) |> 
+      reframe(
+        rp = rps_calc,
+        rp_level = lp3_rp_moments(x= value, return_period = rps_calc),
+        method = "L-moments"
+      )
   )
 
+df_lp3_rp_levels |> 
+  ggplot(
+    aes(x= rp, y = rp_level,group = method, color =method)
+  )+
+  geom_point(alpha=0.5) +
+  geom_line(alpha=0.1)+
+  scale_color_manual(values = c("red","black"))+
+  facet_wrap(~adm1_en)
 ```
 
+```{r}
+#| eval: false
 
-# Discussion
+df_lp3_rp_levels_wide <- df_lp3_rp_levels |> 
+  pivot_wider(
+    names_from = method ,
+    values_from = rp_level
+  )
 
-- To add an RP column to the admin 2 level FloodScan data we need to use a probability distribution based method rather than empirical approach as we would like the best approximation for values > the historical record. However, we still need to choose which distribution to use. This is still an open question {@sec-outstanding}, but my first thought is that GEV is the easiest to justify as it combines properties of Gumbel and.. to be more general.
+df_lp3_rp_levels_wide |> 
+  ggplot(
+    aes(x= Manual,y= `L-moments`)
+  )+
+  geom_point()+
+  facet_wrap(~adm1_en)
 
-General benefits of distribution based methods:
+df_lp3_rp_levels_wide |>
+  mutate(
+    diff = Manual-`L-moments`,
+    pct_diff = (Manual-`L-moments`)/`L-moments`,
+    abs_pct_diff = abs(pct_diff)
+  ) |> 
+  group_by(adm1_en) |> 
+  summarise(
+    avg_pct_diff = mean(pct_diff,na.rm=T),
+    avg_abs_pct_diff = mean(abs_pct_diff,na.rm=T),
+    rmse = sqrt(mean((diff)^2))
+  )
+```
 
-- confidence intervals
-- extreme values: > historical record?
-- potential to weight values different (i.e down-weight more recent extremes)?
+```{r lmoom_package}
+#| eval: false
 
-Benefits of empirical methods
+# playing with lmom
+rp_lp3_test <- c(1,5,10,100,1000)
 
-- simpler calculations/easier to understand
-- clear method for calculating return period for both positive and negative polarity events
-- easy to implement at any level - zonal/pixel
+ck <- df_year_max |> filter(
+  adm1_en == "Bakool"
+)
+sorted_maxima <-  sort(ck$value)
+fit <- lmom::samlmu(sorted_maxima)
+para3 <- lmom::pelpe3(fit)
+?lmom
+lmom:::pelxxx
+?lmom::evplot(y= c(2,4, 10),para = para3)
+# Extreme-value plot of Ozone from the airquality data
+data(airquality)
+?lmom::evplot(airquality$Ozone)
+library(lmom)
+evdistq(quagev, pelgev(samlmu(airquality$Ozone)))
+# Not too good -- try a kappa distribution instead
+evdistq(quakap, pelkap(samlmu(airquality$Ozone)), col="red")
+evdistq(quape3, pelpe3(samlmu(airquality$Ozone)), col="red")
+evplot(airquality$Ozone)
 
-## Outstanding questions/issues {#sec-outstanding}
+evplot(ck$value)
+evdistq(y=c(1,2,3),?quape3, pelpe3(samlmu(ck$value)), col="red")
 
-
-**FloodScan Specific**
-
-- what range to to calculate the RP value. The first step in calculating RP values is to take the annual maxima of the data. For seasonal analyses we look for this annual maxima for just the season of interest. In this floodscan product we don't have any inherent seasons of interest, however in the raster product to calculate historical baseline we do apply a smoothing function of `+/-n` days (likely 10). In theory we could recalculate the RP values based on only that window rather than the full year.
-  + I'm not sure, but I think it might be best to just include the average anomaly value that incorporates this type of seasonality and leave the RP calculation based on the full the annual maxima. I'd be concerned that calculating this n-day RP sort of distorts the concept of RP and would be difficult for users to interpret. So perhaps the following columns : `Date`, `SFED (avg)`, `RP`, `Anomaly`
-- How useful is the RP column generally if the vast majority are just `1`? Is there a way to calculate sub-1 RP values? I don't think so because you have to choose a block size to calculate the maxima over and if you do this the calculation and result changes.
-- Which distribution to use? it does depend on distribution of data, but as we are looking at all of Africa we need something general that is appropriate - maybe GEV?
-- If we use last 10 years of data for baseline calculations and full record for RP. Anomalies from baseline calculation may contradict RP values.
-
-**General**
-
-- What is the general method for empirical RP calculation? Let's go with Weibell?
-- What is the general method for probability RP calculation based RP? Let's go with GEV?
-- Perhaps we can develop some guidelines like: IF RPs < 7 empirical-Weibell is fine, otherwise GEV?
-- How to include seasonality: keep RP based on full year, but include anomaly metric (probably should) be calcualted from same time period as baseline value is?
-
-
-## Limitation
-
-This document on only addresses return period calculated on positive polarity where the extreme event is represented by the maxima. However, much of this can be applied to RPs calculated for minima as well.
+quape3(f= c(1-(1/rp_lp3_test)), para = para3)
 
 
-# Appendix
 
+
+#Fitting recurrence time employing Gumbel distribution
+y<-c(9000,sorted.maximas)
+gumbel.accum<-cdfgum(y,para)
+fitted.tr<-1/(1-gumbel.accum)
+lines(fitted.tr,y,col="blue",lty=2)
+
+#Fitting recurrence time emplyoing Log Pearson 3 distribution
+lp3.accum<-cdfpe3(y,para3)
+fitted.tr3<-1/(1-lp3.accum)
+lines(fitted.tr3,y,col="red")
+
+df_year_max |> 
+  group_by(adm1_en) |> 
+  summarise(
+    fit = list(lmom::samlmu(value))
+  )
+```
+
+```{r}
+# original lp3 func used in beginnign
+lp3 <- function(x){
+  x_sorted <- sort(x, decreasing = TRUE)
+  x_length <-  length(x_sorted)
+  rank = 1:x_length
+  exceedance_prob <-  rank /(x_length+1)
+  rp = 1/exceedance_prob
+  x_log = log10(x_sorted)
+  x_log_mean = mean(x_log)
+  g = moments::skewness(x_log)
+  stdev = sd(x_log)
+  q_norm = qnorm(1-exceedance_prob, mean =0 , sd =1)
+  k = (2/g)*(((q_norm-(g/6))*(g/6)+1)^3-1)
+  y_fit = x_log_mean + k * stdev
+  y_antilog <- 10^y_fit
+  orig_order <- order(x, decreasing = TRUE)
+  inv_orig_order <- order(orig_order)              # Indices that reverse the sorting
+  
+  ret <- y_antilog[inv_orig_order] 
+  return(ret)
+}
+```
+
+```{r simData}
+#| eval: false
 
 ## Simulating Data
 
-TBD ... I started playing with simulating data thinking that it would be interesting to see how distributions and number of simulations would effect the maxima distributions, but then decided there should be ample literature on this.
-
-```{r simData}
+# TBD ... I started playing with simulating data thinking that it would be interesting to see how distributions and number of simulations would effect the maxima distributions, but then decided there should be ample literature on this.
 
 num_days <- 365*1000
 end_date <- ymd("2023-12-31")
@@ -810,9 +1418,8 @@ p_norm_daily +
   patchwork$plot_annotation(
     title = "Simulated data from normal disribution"
   )
-  
-```
 
+```
 
 ```{r attemptSmallBlock}
 #| eval: false
@@ -933,7 +1540,6 @@ pivot_longer(
   ggplot(aes(x= RP, y=value, color = name))+
   geom_point()
 ```
-
 
 ```{r}
 #| eval: false
@@ -1064,8 +1670,6 @@ df_all_methods_long <- df_empirical |>
   )
 ```
 
-
-
 ```{r}
 #| eval: false
 #| fig.height: 10
@@ -1090,6 +1694,3 @@ df_all_methods_long |>
     ~adm1_en
   )
 ```
-
-```
-
