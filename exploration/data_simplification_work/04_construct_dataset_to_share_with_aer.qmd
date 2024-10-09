@@ -408,7 +408,7 @@ set.names( # set in place
 
 ```{r}
 
-
+unlink(td)
 td <- file.path(tempdir(),"aer_floodscan_300s_SFED_90d")
 
 # for some reason w/ in map writeRaster can't write to a dir
@@ -450,7 +450,7 @@ lr_sample <-   furrr$future_map(
 
 
 
-zip_name <- glue$glue("{format(as_date(PUB_DATE_EXAMPLE),'%Y%m%d')}_somalia_aer_floodscan_300s_SFED_90d")
+zip_name <- glue$glue("{format(as_date(PUB_DATE_EXAMPLE),'%Y%m%d')}_somalia_aer_floodscan_300s_SFED_90d.zip")
 zip(
   zipfile = zip_name,
   files = list.files(td,full.names = TRUE),
@@ -555,8 +555,6 @@ However to calculate the RPs we need to look at the longer dataset.
 ### RPs
 
 ```{r}
-# box::reload(rp)
-
 df_year_max = df_zonal |> 
   group_by(adm1_en,adm1_pcode, year_date = floor_date(date, "year")) |> 
   summarise(
@@ -616,6 +614,8 @@ df_zonal_rps <- df_zonal |>
 ```
 
 
+### Final Tabular
+
 ```{r}
 tabular_dataset_compiled <- tabular_dataset_prepped |> 
   left_join(
@@ -627,7 +627,9 @@ tabular_dataset_compiled <- tabular_dataset_prepped |>
     adm1_pcode, .after= adm1_en
   ) 
 
-tabular_dataset_compiled |> 
+classify_rp <- c(T,F)[2]
+if(classify_rp){
+tabular_dataset_final <- tabular_dataset_compiled |> 
   mutate(
     rp_rounded = round(rp_lp3, 2),
     RP = case_when(
@@ -638,12 +640,94 @@ tabular_dataset_compiled |>
   ) |> 
   select(
     -rp_lp3, -rp_rounded
-  )
-  
+  )  
+}
+if(!classify_rp) {
+  tabular_dataset_final <- tabular_dataset_compiled |> 
+    rename(
+      RP = "rp_lp3"
+    )
+}
+
+
+tabular_file_name <- glue$glue("{format(PUB_DATE_EXAMPLE,'%Y%m%d')}_som_floodscan_adm1.csv")
+box::use(readr)
+readr$write_csv(tabular_dataset_final,tabular_file_name)
+
 ```
 
 
 ## Appendix
+
+
+### Review Exported Datasets
+```{r}
+unlink(td)
+td <- tempdir()
+td <- file.path(
+  td,
+  "fs_temp"
+  )
+
+dir.create(td)
+
+
+unzipped_files <- unzip(
+  zip_name,
+  list=TRUE
+  )
+# inside_zip_tifs <- str_subset(inside_zip$Name,"\\.tif$")
+unzip(zip_name,exdir = td,files = unzipped_files$Name)
+
+r_sample <- rast(list.files(td,full.names = T))
+r_sample_sfed <- r_sample[[names(r_sample)=="SFED"]]
+r_sample_baseline <- r_sample[[names(r_sample)=="SFED_BASELINE"]]
+set.names(r_sample_sfed, utils$extract_date(sources(r_sample_sfed)))
+set.names(r_sample_baseline, utils$extract_date(sources(r_sample_baseline)))
+
+tabular_sample <- readr$read_csv(tabular_file_name)
+
+
+rdfz_sample_ck <- list(
+  "SAMPLE_BASELINE"= r_sample_baseline,
+  "SAMPLE_VALUES" = r_sample_baseline
+) |> 
+  imap(
+    \(tr,nm){
+      exactextractr$exact_extract(
+        x =tr,
+        y= lgdf$som_adm1,
+        append_cols = "ADM1_EN", 
+        fun = "mean"
+      ) |> 
+        pivot_longer(
+          -ADM1_EN,
+          values_to= nm
+        ) |> 
+        separate(
+          name,c("stat","date"),sep = "\\."
+        ) |> 
+        mutate(
+          date= as_date(date),
+          doy = yday(date)
+        ) |> 
+        clean_names()
+    }
+  ) |> 
+  reduce(left_join)
+
+
+# looks good
+tabular_sample |> 
+  left_join(
+    rdfz_sample_ck
+  )
+
+```
+
+
+
+
 Same baseline comparisons, but admin 1 level
 
 ```{r}
