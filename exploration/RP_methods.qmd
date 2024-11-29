@@ -1,9 +1,13 @@
 ---
+title-block-banner: "#00ad78ff"
+title-block-banner-color: "#ffffff"
 title: RP Methods - Tabular Admin 2 Pipeline
 subtitle: FloodScan HDX 
 format:
   html:
     toc: true
+    toc-color: "red"
+    toc-active-border: "#00ad78ff"
     toc-depth: 3
     code-fold: true
     self-contained: true
@@ -33,17 +37,83 @@ box::use(
   gghdx[...],
   reactable[...],
   tidyr[...],
+  sf[...],
   patchwork,
   arrow,
   AzureStor,
   scales,
   ggridges,
+  DBI,
+  RPostgres,
   janitor[clean_names],
   paths = .. / R / path_utils,
   .. / src / utils / blob
   )
 gghdx()
 ```
+
+```{r getAllFloodScan}
+
+# Get all floodscan from DB.
+con <- DBI$dbConnect(
+    drv = RPostgres$Postgres(),
+    user = Sys.getenv("AZURE_DB_USER_ADMIN"),
+    host = Sys.getenv("AZURE_PROD_DB_HOST"),
+    password = Sys.getenv("AZURE_PROD_DB_PW"),
+    port = 5432,
+    dbname = "postgres"
+  )
+
+
+
+
+tbl_floodscan <- tbl(con,"floodscan") |> 
+  filter(
+    band == "SFED",
+    adm_level ==1
+    ) |> 
+  select(
+    iso3:mean
+  )
+
+tbl_poly <- tbl(con, "polygon") |> 
+  filter(
+    adm_level ==1
+  ) |> 
+  select(
+    iso3,
+    pcode,
+    name
+    )
+
+tbl_iso_name_lookup <- tbl(con, "polygon") |> 
+  filter(
+    adm_level ==0
+  ) |> 
+  select(
+    iso3,
+    name
+    ) |> 
+  rename(
+    country_name = name # need to rename for join later
+  )
+
+tbl_floodscan_complete <- tbl_floodscan |> 
+  left_join(
+    tbl_poly, by = c("iso3","pcode")
+  ) |> 
+  left_join(
+    tbl_iso_name_lookup ,
+    by = "iso3"
+  )
+
+
+system.time(
+  df_zonal <- collect(tbl_floodscan_complete)
+)
+
+```
+
 
 **Work in Progress**
 
@@ -164,7 +234,6 @@ rps_test <- c(2:28)
 
 
 ```
-
 
 ```{r}
 df_year_max <- df_zonal |>
@@ -462,6 +531,102 @@ df_all_rp_values |>
   
 ```
 
+## Can Distributions Exceed 100%?
+
+```{r exceed100}
+#| eval: True
+#| fig.height: 7.5
+
+
+rps_extreme <- c(1.1,2:1000000)
+rps_extreme <-  seq(5, 25000, by =10)
+df_gev_gumbel_very_extreme  <- df_modeled |> 
+  group_by(adm1_en,adm1_pcode) |> 
+  reframe(
+    RP =rps_extreme,
+    value_GEV = as.numeric(return.level(fevd_gev[[1]], rps_extreme)),
+    value_Gumbel = as.numeric(return.level(fevd_gumbel[[1]], rps_extreme))
+  )
+
+df_gev_gumbel_very_extreme_long <- df_gev_gumbel_very_extreme |> 
+  pivot_longer(
+    cols = starts_with("value")
+  ) |> 
+  mutate(
+    distribution = str_remove(name,"value_")
+  )
+
+df_lp3_very_extreme <- df_linear_interp_funcs |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  reframe(
+    RP_empirical = rps_extreme,
+    value_empirical = map_dbl(RP_empirical,calc_empirical_rp_level),
+    # these values are exactly the same as already calculated in `df_lp3_rps`
+    # step is redundant, but will pack it in here anyways
+    value_LP3 = map_dbl(RP_empirical,calc_lp3_rp_level),
+    RP_LP3_calc = map_dbl(value_empirical,calc_lp3_rp)
+    ) |> 
+  select(
+    adm1_en, adm1_pcode, RP = RP_empirical, value = value_LP3
+  ) |> 
+  mutate(
+    distribution = "LP3"
+  )
+
+
+df_very_extreme <- bind_rows(
+  df_gev_gumbel_very_extreme_long,
+  df_lp3_very_extreme
+)
+
+
+
+df_impossible_breaches <- df_very_extreme |> 
+  group_by(adm1_en,adm1_pcode, distribution) |>
+  arrange(adm1_en,adm1_pcode,distribution,RP) |> 
+  mutate(
+    breach =  value>=1 & lag(value)<1
+  ) |> 
+  filter(breach)
+
+
+cpal <- c(
+  LP3 = hdx_hex("mint-hdx"),
+  GEV = hdx_hex("sapphire-hdx"),
+  Gumbel = "black"
+)
+
+df_very_extreme |> 
+  ggplot(
+    aes(x= RP, y= value, color = distribution, group =distribution)
+  )+
+  geom_point(
+    data = df_impossible_breaches
+  )+
+  geom_text(
+    data= df_impossible_breaches, aes(label = RP), nudge_x= 4000, nudge_y = 0.4
+  )+
+  geom_line()+
+   scale_color_manual(values=cpal)+
+  geom_hline(yintercept =1, color = "red", linetype = "dashed")+
+  facet_wrap(
+    ~adm1_en, 
+    scales = "free_y"
+  )+
+  labs(
+    title = "Do RV values exceed 100% flood fraction?",
+    subtitle= "GEV exceeeds in some cases whereas other curves flatten out"
+  )+
+  theme(
+    legend.title = element_blank(),
+    axis.text =element_text(size=7),
+    axis.text.x = element_text(angle = 90),
+    strip.text = element_text(size = 8)
+  )
+```
+
 ## LP3 vs Empirical
 
 "According to the U.S. Water Advisory Committee on Water Data (1982), the Log-Pearson Type III Distribution is the recommended technique for flood frequency analysis" [OSU](https://streamflow.engr.oregonstate.edu/analysis/floodfreq/)
@@ -611,6 +776,18 @@ df_lmom_rp <- df_lmom_params |>
     c(date, value, lmom_rp)
   )
 
+
+df_lmom_rp |> 
+  group_by(adm1_en) |> 
+  summarise(
+    max = max(lmom_rp, na.rm=T)
+  )
+
+df_lmom_params |> 
+  filter(adm1_en == "Bari") |> 
+  unnest(params)
+
+
 # df_zonal_all_rps |> 
 #   left_join(
 #     df_lmom_rp
@@ -690,15 +867,218 @@ df_all_rp_values2 |>
     x = "Return Period",
     y= "Return Value"
     
-    
   )+
   theme(
-        legend.title = element_blank(),
+    legend.title = element_blank(),
     axis.text =element_text(size=7),
     axis.text.x = element_text(angle = 90),
     strip.text = element_text(size = 8)
   )
+
+```
+
+```{r}
+#| eval: true
+
+# looking into this a bit more... im not 100% sure the comparison above is correct. It might just be a pearson III distribution... not a log III pearson distribution.... weirdly the untransformed version is actually closer to the manual version...
+log_lp3m_params <- function(x) {
+  x[x==0]<-min(x[x!=0])
+  x <- sort(x)
+  log_x <- log(x)  # Apply log transformation
+  fit <- lmom::samlmu(log_x, nmom= 4,sort.data = FALSE)
+  lmom::pelpe3(fit)
+}
+
+
+log_lp3m_rp <- function(x, params) {
+  x[x==0]<-min(x[x!=0])
+  x_sorted <- sort(x)
+  log_x <- log(x_sorted)  # Ensure log transformation for consistency
+  p_lte <- lmom::cdfpe3(x = log_x, para = params)
+  p_gte <- 1 - p_lte
+  rp <- 1 / p_gte
+  return(rp)
+}
+```
+
+```{r}
+#| eval: false
+df_year_max_sample <- df_year_max |> 
+  filter(
+    adm1_en=="Bari"
+  )
+
+df_sample <- df_zonal |> 
+  filter(
+    adm1_en=="Bari"
+  )
+
   
+  # x <- sort(x)
+  log_x <- log(df_year_max_sample$value)  # Apply log transformation
+  fit <- lmom::samlmu(log_x, nmom= 4,sort.data = FALSE)
+params_sample <- log_lp3m_params(x= df_year_max_sample$value)
+log_lp3m_rp(x= df_sample$value,params= params_sample) |> max()
+
+
+# if we feed parameters from python package distr -- it does give same answer as python package
+# therefore discrepancy is completely in params estimation function.
+params_python <- c( 
+  mu = -5.9305989336402725, 
+  sigma =0.9757019202985808,
+  gamma = -0.7320879382645643
+)
+
+log_lp3m_rp(x= df_sample$value,params= params_python) |> max()
+
+
+
+
+log_lp3m_rv <- function(x, return_periods){
+  x[x==0]<-min(x[x!=0])
+  log_x = log(x)
+  fit <- lmom::samlmu(log_x, sort.data = T)
+  params <- lmom::pelpe3(fit)
+  exceedance_probs <-  1-(1/return_periods)
+  exp(lmom::quape3(f= exceedance_probs, para = params))
+}
+
+df_year_max |> 
+  filter(
+    value ==0
+  )
+df_log_lp3_params <- df_year_max |> 
+  # filter(adm1_en == "Bari") |> 
+  group_by(
+    adm1_en,adm1_pcode
+  ) |> 
+  summarise(
+    params = list(log_lp3m_params(value))
+  ) 
+  
+  
+df_log_lmom_rp <- df_log_lp3_params |> 
+  # filter(adm1_en =="Bari") |> 
+  left_join(
+    df_zonal |> 
+      group_by(adm1_en, adm1_pcode) |>
+      summarise(
+        date = list(date),
+        value = list(value)
+      )
+  ) |> 
+  mutate(
+    lmom_rp = list(log_lp3m_rp(x= unlist(value), para = unlist(params)))
+      ) |> 
+  select(starts_with("adm1_"), date, value, lmom_rp) |> 
+  unnest(
+    c(date, value, lmom_rp)
+  )
+df_log_lmom_rp |> 
+  group_by(adm1_en) |> 
+  summarise(
+    max(lmom_rp )
+  )
+
+df_log_lp3m_rv <- df_year_max |> 
+  group_by(
+    adm1_en, adm1_pcode
+  ) |> 
+  reframe(
+    RP = rps_interp_extrap,
+    RV = log_lp3m_rv(
+    x= value,
+    return_period = rps_interp_extrap
+    ),
+    method = "Log LP3 Moments"
+  )
+
+df_lp3m_rv <- df_year_max |> 
+  group_by(
+    adm1_en, adm1_pcode
+  ) |> 
+  reframe(
+    RP = rps_interp_extrap,
+    RV = lp3m_rv(
+    x= value,
+    return_period = rps_interp_extrap
+    ),
+    method = "LP3 Moments"
+  )
+
+
+df_all_rp_values2 <- df_all_rp_values |> 
+  select(
+    starts_with("adm1"),
+    RP = RP_empirical,
+    value_empirical,
+    lp3_manual = value_LP3,
+  ) |> 
+  left_join(
+    df_lp3m_rv |> 
+      select(-method) |> 
+      rename(
+        value_lp3_lmoments = RV
+      )
+    ,) |> 
+  left_join(
+    df_log_lp3m_rv |> 
+      rename(
+        value_log_lp3_lmoments = RV
+      ) |> 
+      select(-method)
+  )
+df_all_rp_values2 |> 
+  mutate(
+    lmom_rmse = (value_lp3_lmoments-lp3_manual)^2,
+    log_lmom_rmse = (value_log_lp3_lmoments-lp3_manual)^2
+  ) |> 
+  group_by(adm1_en) |>
+  summarise(
+    lmom_rmse = mean(lmom_rmse, na.rm = T),
+    log_lmom_rmse = mean(log_lmom_rmse, na.rm = T),
+  ) 
+
+
+  left_join(
+    df_log_lp3m_rv |> 
+      rename(
+        `value_LP3 (log moments)` = RV
+      ),
+    by = c("adm1_en","adm1_pcode","RP_empirical"= "RP")
+  ) 
+
+
+df_all_rp_values2 |>
+  select(starts_with("adm"),RP_empirical, contains("value_LP")) |> 
+  pivot_longer(
+    cols = contains("value_LP"),
+  ) |> 
+  mutate(
+    label  = if_else(name == "value_LP3", "LP3 (manual)", "Log LP3 (L-moments)")
+  ) |> 
+  ggplot(
+    aes(x= RP_empirical, y= value, color =label)
+  )+
+    geom_line(alpha=0.2) +
+  geom_point(
+    alpha =0.2,
+    size =1) +
+  facet_wrap(~adm1_en)+
+  labs(
+    title = "LP3 Method Comparison: Manual vs L-Moments",
+    subtitle = "FloodScan: Somalia Admin 1 Aggregations",
+    x = "Return Period",
+    y= "Return Value"
+    
+  )+
+  theme(
+    legend.title = element_blank(),
+    axis.text =element_text(size=7),
+    axis.text.x = element_text(angle = 90),
+    strip.text = element_text(size = 8)
+  )
+
 ```
 
 # Example of Admin 1 Stats
@@ -997,28 +1377,25 @@ $$
 -   $g$ is the skewness of the log-transformed data,
 -   $Z_T$ is the standard normal quantile corresponding to the exceedance probability $P_T = \frac{1}{T}$.
 
-
 ## Filtering out low-duration peaks
 
 **TBD**
 
-There was a suggestion to filter out low duration peaks (< 2 or 3days) before running RP calculation. I started thinking about this, but not sure how to implement it in a way that would be generalization or how necessary it is. Some thoughts:
+There was a suggestion to filter out low duration peaks (\< 2 or 3days) before running RP calculation. I started thinking about this, but not sure how to implement it in a way that would be generalization or how necessary it is. Some thoughts:
 
 It's the max values per year/admin that we are concerned with as those are the input for the RP calculations, but we don't currently have an algorithm picked out that would generalize well to this across thousands of admin 2 units. I thought through some possibilities below, and so far think it's overly complicated and would cause problems with an automated pipeline for a variety of reasons:
 
-1. We don't have a threshold that constitutes whether or not a peak is sustained.
-2. It would be a cause for concern if the max peak days per year were false positives. I could imagine false positive noise scattered through the time series, but would think if they were high enough to create a yearly maxima that would indicate some more systemic issue?
-2. Using a n-day average to calculate the max peak per year would dampen the effect of extreme daily value which could be real, especially in flash flood scenarios which FloodScan does seem to pick up well in some contexts? Also it could be confusing if the admin stats are provided at daily time-steps, but the RP calculations is based on n-day average value.
+1.  We don't have a threshold that constitutes whether or not a peak is sustained.
+2.  It would be a cause for concern if the max peak days per year were false positives. I could imagine false positive noise scattered through the time series, but would think if they were high enough to create a yearly maxima that would indicate some more systemic issue?
+3.  Using a n-day average to calculate the max peak per year would dampen the effect of extreme daily value which could be real, especially in flash flood scenarios which FloodScan does seem to pick up well in some contexts? Also it could be confusing if the admin stats are provided at daily time-steps, but the RP calculations is based on n-day average value.
 
 Theoretically we could attempt something like the below (but just writing it out seems problematic):
 
-1. Take the take an n-day (3 day?) rolling centered mean across the time series smooth the values.
-2. calculate the max **daily** value per year + admin, **max n-day mean** value per year + admin
-3. We could then see if the n-day max value aligns with the max 3-day mean value. We could say it does if they are with **n** (5?) days of each other. If they are not, we could use the next highest daily peak that DOES align with the smoothed peak. 
-    + Seems problematic as the appropriate **n** could change based on admin. There will be a large number of admin + year combinations that will be very flat with almost all 0 values.
-    + additionally there will be many instances when the same exact max value occurs more than 1x per year. For simple unfiltered RP calculation this is fine, but when trying to consider if either are not a sustained peak it adds a complication.
-
-
+1.  Take the take an n-day (3 day?) rolling centered mean across the time series smooth the values.
+2.  calculate the max **daily** value per year + admin, **max n-day mean** value per year + admin
+3.  We could then see if the n-day max value aligns with the max 3-day mean value. We could say it does if they are with **n** (5?) days of each other. If they are not, we could use the next highest daily peak that DOES align with the smoothed peak.
+    -   Seems problematic as the appropriate **n** could change based on admin. There will be a large number of admin + year combinations that will be very flat with almost all 0 values.
+    -   additionally there will be many instances when the same exact max value occurs more than 1x per year. For simple unfiltered RP calculation this is fine, but when trying to consider if either are not a sustained peak it adds a complication.
 
 ```{r}
 #| eval: false 
@@ -1059,7 +1436,6 @@ df_zonal |>
   
 ```
 
-
 ## RPs & Seasonality - General {#sec-seasonality}
 
 It was decided not to build seasonality into the RP calculations and rather handle this component in our baseline calculations which the user can use to better understand seasonal anomalies. Nonetheless, I've tried to summarize some of the discussions/thinking below.
@@ -1081,7 +1457,6 @@ Therefore, we think it is better to communicate seasonal outliers with season an
 -   Utility of RP column especially since most values are 1. Can we calculte values below 1?
 -   Which EVD distribution to use?
 -   LP3 as it is a hydrological standard and performs with FloodScan when compared to Gumbel and GEV
-
 
 ```{r}
 df_percentiles <- imap(
@@ -1188,7 +1563,7 @@ reactable(df_correlation_percentile_vs_manual,
 
 ## Additional Reading to Check out
 
-- [User's Manual for Program PeakFQ, Annual Flood-Frequency Analysis Using Bulletin 17B Guidelines](https://pubs.usgs.gov/tm/2006/tm4b4/)
+-   [User's Manual for Program PeakFQ, Annual Flood-Frequency Analysis Using Bulletin 17B Guidelines](https://pubs.usgs.gov/tm/2006/tm4b4/)
 -   [Low flow frequency analysis by L-moments method (Case study: Iranian Central Plateau River Basin)](https://jdesert.ut.ac.ir/article_56480_6eeaa5fc9a6bdc22bbf32ee7764f1cec.pdf)
 -   [The generalized method of moments as applied to problems of flood frequency analysis: Some practical results for the log-Pearson type 3 distribution](https://www.sciencedirect.com/science/article/abs/pii/0022169487900679)
 -   [Flood Frequency Analysis By Gumble & Log Pearson III](https://www.excelcalcs.com/calcs/repository/Fluids/Rainfall/Flood-Frequency-Analysis-By-Gumble-and--Log-Pearson-III/)

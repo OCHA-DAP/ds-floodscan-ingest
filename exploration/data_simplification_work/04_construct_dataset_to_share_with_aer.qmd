@@ -117,7 +117,7 @@ r_baseline_cropped <- crop(r_baseline, gdf_bbox)
 
 r_baseline_pre20 <- crop(r_baseline_presmooth20d, gdf_bbox)
 r_baseline_pre10 <- crop(r_baseline_presmooth10d, gdf_bbox)
-# ext(r_baseline_cropped)
+
   
 
 r_baseline_post10 <- roll(

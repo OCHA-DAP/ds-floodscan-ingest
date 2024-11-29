@@ -1,0 +1,1314 @@
+---
+title-block-banner: "#00ad78ff"
+title-block-banner-color: "#ffffff"
+title: RP Methods (Full DB) - Tabular Data Admin 2
+subtitle: FloodScan HDX 
+format:
+  html:
+    toc: true
+    toc-color: "red"
+    toc-active-border: "#00ad78ff"
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+    embed-resoures: true
+    smooth-scroll: true
+    number-sections: true
+execute:
+  include: true
+  echo: false
+  warning: false
+  message: false
+  eval: true
+  results: "asis"
+  out.width: "100%"
+  code-fold: true
+editor: visual
+---
+
+```{r setup}
+box::use(
+  dplyr[...],
+  ggplot2[...],
+  stringr[...],
+  lubridate[...],
+  purrr[...],
+  extRemes[...],
+  gghdx[...],
+  reactable[...],
+  tidyr[...],
+  sf[...],
+  dbplyr[...],
+  gt,
+  readr,
+  patchwork,
+  arrow,
+  glue,
+  AzureStor,
+  scales,
+  ggridges,
+  DBI,
+  RPostgres,
+  janitor[clean_names],
+  paths = .. / R / path_utils,
+  .. / src / utils / blob
+  )
+gghdx()
+
+```
+
+
+```{r}
+#| eval: false
+
+bc <- blob$load_containers()
+gc <- bc$GLOBAL_CONT
+pc <- bc$PROJECTS_CONT
+
+AzureStor$download_blob(
+  container = pc,
+  src = fp_zonal,
+  dest = tf <- tempfile(fileext = ".parquet"),
+  overwrite = T
+)
+df_zonal_blob <- arrow$read_parquet(tf) |>
+  clean_names()
+
+df_blob_yr_max <- df_zonal_blob |>
+  mutate(
+    year_date = floor_date(date, "year")
+  ) |>
+  # didn't want to go through 2024 since year is not finished so
+  # chose an arbitraty cutoff date
+  filter(year_date <= "2023-12-31") |>
+  group_by(
+    adm1_en, adm1_pcode, year_date
+  ) |>
+  summarise(
+    value = max(value),
+    .groups = "drop"
+  )
+
+
+```
+
+
+
+
+```{r create_tbl_adm2}
+#| eval: false
+
+box::use(../R/pg_fs)
+con <- pg_fs$connect_db(storage_account = "prod")
+tbl_floodscan <- tbl(con,"floodscan")
+tbl_polygon <- tbl(con,"polygon")
+
+tbl_floodscan_filt <- tbl_floodscan |> 
+  filter(
+    adm_level ==2,
+    band == "SFED",
+    valid_date <= as_date("2023-12-31")
+  ) |> 
+  select(
+    iso3, pcode, adm_level,valid_date, adm_level, band,mean
+  )
+
+
+tbl_floodscan_filt |> 
+  filter(is.na(median)) |> show_query()
+
+tbl_yr_max <- tbl_floodscan_filt |> 
+  mutate(
+    year_date = as_date(floor_date(valid_date, "year"))
+  ) |> 
+  group_by(
+    iso3, pcode, year_date
+  ) |>
+  summarise(
+    value = max(mean,na.rm=T),
+    .groups = "drop"
+  )
+
+
+
+tbl_polygon_adm2 <- tbl_polygon |> 
+  filter(
+    adm_level ==2,
+  ) |> 
+  select(
+    pcode, iso3,adm_level , adm_en=name
+  )
+
+tbl_polygon_adm0 <- tbl_polygon |> 
+  filter(
+    adm_level ==0,
+  ) |> 
+  select(
+     iso3,adm0_en = name
+  )
+
+tbl_yr_max_named <- tbl_yr_max |> 
+  left_join(
+    tbl_polygon_adm2, by = c("pcode","iso3")
+  ) |> 
+  left_join(tbl_polygon_adm0, by ="iso3")
+```
+
+```{r create_tbl_adm1}
+#| eval: false
+
+box::use(../R/pg_fs)
+con <- pg_fs$connect_db(storage_account = "prod")
+tbl_floodscan <- tbl(con,"floodscan")
+tbl_polygon <- tbl(con,"polygon")
+
+tbl_floodscan_filt <- tbl_floodscan |> 
+  filter(
+    adm_level ==1,
+    band == "SFED",
+    valid_date <= as_date("2023-12-31")
+  ) |> 
+  select(
+    iso3, pcode, adm_level,valid_date, adm_level, band,mean
+  )
+
+
+
+tbl_yr_max <- tbl_floodscan_filt |> 
+  mutate(
+    year_date = as_date(floor_date(valid_date, "year"))
+  ) |> 
+  group_by(
+    iso3, pcode, year_date
+  ) |>
+  summarise(
+    value = max(mean,na.rm=T),
+    .groups = "drop"
+  )
+
+
+
+tbl_polygon_adm1 <- tbl_polygon |> 
+  filter(
+    adm_level ==1,
+  ) |> 
+  select(
+    pcode, iso3,adm_level , adm_en=name
+  )
+
+tbl_polygon_adm0 <- tbl_polygon |> 
+  filter(
+    adm_level ==0,
+  ) |> 
+  select(
+     iso3,adm0_en = name
+  )
+
+tbl_yr_max_named_adm1 <- tbl_yr_max |> 
+  left_join(
+    tbl_polygon_adm1, by = c("pcode","iso3")
+  ) |> 
+  left_join(tbl_polygon_adm0, by ="iso3")
+```
+
+```{r}
+#| eval: false
+
+tbl_null_stats <- tbl_floodscan |> 
+  filter(
+    adm_level ==2,
+    band == "SFED",
+  ) |> 
+  # select(iso3, pcode,valid_date, adm_level,band,mean) |> 
+  filter(is.na(mean))# show_query()
+
+tbl_null_stats_by_iso3 <- tbl_null_stats |> 
+  group_by(
+    iso3
+  ) |> 
+  summarise(
+    num_occurences=n()
+  )
+
+df_null_by_iso3 <- collect(tbl_null_stats_by_iso3)
+
+df_null_by_iso3 |> knitr::kable()
+
+tbl_null_stats |> 
+  distinct(iso3,pcode) |> 
+  group_by(iso3) |> 
+  summarise(
+    num_pcodes= n()
+  ) |> 
+  collect() |> 
+  knitr::kable()
+
+tbl_null_stats_by_iso3 |> show_query()
+```
+
+
+```{r collect_df}
+#| eval: false
+
+system.time(
+  df_yr_max <- collect(tbl_yr_max_named)
+)
+#>  user  system elapsed 
+#>  0.310   0.096  31.982 
+
+system.time(
+  df_yr_max_adm1 <- collect(tbl_yr_max_named_adm1)
+)
+
+
+readr::write_rds(df_yr_max,"data/df_yr_max_postgres.rds")
+readr::write_rds(df_yr_max_adm1,"data/df_yr_max_adm1_postgres.rds")
+
+```
+
+
+```{r}
+df_yr_max <- readr$read_rds ("../data/df_yr_max_postgres.rds")
+df_yr_max_adm1 <- readr$read_rds ("../data/df_yr_max_adm1_postgres.rds")
+
+
+```
+
+
+```{r}
+#| eval: false
+
+## Quickly Compare Blob
+df_som_pg_blob <- df_yr_max_adm1 |> 
+  filter(iso3 == "SOM") |> 
+  rename(
+    postgres_value = value
+  ) |> 
+  left_join(
+    df_blob_yr_max |> 
+      rename(blob_value=value), 
+    by = c("pcode"="adm1_pcode","year_date")
+  ) |> 
+  select(iso3,pcode,year_date, postgres_value,blob_value) |> 
+  pivot_longer(
+    cols= postgres_value:blob_value 
+  ) |> 
+  group_by(iso3,pcode,name) |> 
+    reframe(
+    RP = rps_to_calc,
+    RV = rp$rv_lp3(
+      x = value, 
+      return_period = rps_to_calc,
+      method = "usgs")
+  ) |> 
+  ungroup()
+
+df_som_pg_blob |> 
+
+  ggplot(
+    aes(x=RP, y=RV, color =name)
+  )+
+  facet_wrap(~pcode) + 
+  geom_line()
+```
+
+
+*WIP*
+
+## Pre-Processing
+
+### Admins with all `0` and `NA` Values:
+
+
+1. `NA Values` - there are 364 cases of `NA SFED` values in `mea`n. These are all contained to NGA a MOZ.  See [open issue](https://github.com/OCHA-DAP/ds-raster-stats/issues/20)
+
+2. `All 0 values`: There are 11 pcodes that have all 0's for yearly max for entire historical record
+
+3. `0 Variance`: just 1 pcode with 0 variance
+
+Since this numbers are pretty small it seems reasonable to remove them in post-processing and include a meta-data table
+
+```{r}
+
+         
+        
+df_yr_max_na_removed <- df_yr_max |> 
+ filter(!is.na(value)) #https://github.com/OCHA-DAP/ds-raster-stats/issues/20
+
+df_yr_max_na_removed |>  
+  group_by(iso3, pcode) |> 
+  summarise(
+    all_0 = all(value==0)
+  ) |> 
+  summarise(
+    number_all_0 = sum(all_0)
+  ) |> 
+  filter(number_all_0 > 0) |> 
+  gt$gt() |> 
+  gt$cols_label(
+    number_all_0 = "Number of adm2 pcodes all 0"
+    )
+```
+
+We can easily just take these out and put in a meta-data table since it's pretty small. Postgres PROD needs to e updated so that we can label these and the rest of data w/ names
+
+```{r}
+
+df_all_0 <- df_yr_max_na_removed |> 
+  filter(!is.na(value)) |>  #https://github.com/OCHA-DAP/ds-raster-stats/issues/20
+  group_by(iso3, pcode) |> 
+  summarise(
+    all_0 = all(value==0)
+  ) |> 
+  filter(all_0) |>
+  ungroup()
+  
+
+df_all_0 |> 
+  gt$gt() |> 
+  gt$cols_hide(columns = "all_0")
+
+```
+
+```{r}
+df_yr_max_w_value <- df_yr_max_na_removed |> 
+  anti_join(
+    df_all_0, by = c("iso3","pcode")
+  )
+
+df_no_variance <- df_yr_max_w_value |> 
+  group_by(iso3, pcode) |> 
+  filter(
+    var(value)==0
+  ) |> 
+  distinct(iso3,pcode,value)
+```
+
+On top of that there is 1 admin 2 that has 0 variance in SFED values and can be removed
+
+```{r}
+df_no_variance |> 
+  gt$gt()
+```
+
+
+
+```{r}  
+df_valid <- df_yr_max_w_value |> 
+  anti_join(
+    df_no_variance, by = c("iso3","pcode")
+  ) 
+
+```
+
+## RP Calcs & Issues
+
+Here we see SFED values for each RP from LP3 Method. We do a `%` of admin units that do reach impossible SFED values of greater than 100%
+
+```{r}
+box::use(rp = ../R/return_period)
+box::reload(rp)
+
+rps_to_calc <- c(1,seq(5,1000, by =5))
+
+
+ df_usgs_adm2 <- df_valid |> 
+  group_by(iso3,pcode) |> 
+  reframe(
+    RP = rps_to_calc,
+    RV = rp$rv_lp3(
+      x = value, 
+      return_period = rps_to_calc,
+      method = "usgs")
+  ) |> 
+  ungroup() 
+
+
+
+
+
+df_usgs_adm2 |> 
+  ggplot(
+    aes(x= RP,y= RV,group = pcode)
+  )+
+  geom_line(alpha=0.2)+
+  facet_wrap(~iso3, scales= "free_y")+
+  geom_hline(
+    yintercept = 1,
+    linetype = "dashed",
+    color = hdx_hex("tomato-hdx")
+    ) +
+  labs(
+    title = "Admin 2 SFED Values Per RP",
+    subtitle = "Values above red horizontal line are Where floood fraction exceeds possible value of 100%"
+  )
+```
+
+
+```{r}
+#| eval: false
+
+df_usgs_adm2 |> 
+  filter(RV<1, RP<100) |> 
+  ggplot(
+    aes(x= RP,y= RV,group = pcode)
+  )+
+  geom_line(alpha=0.1)+
+  facet_wrap(~iso3, scales= "free_y")+
+  geom_hline(
+    yintercept = 1,
+    linetype = "dashed",
+    color = hdx_hex("tomato-hdx")
+    ) +
+  labs(
+    title = "Admin 2 SFED Values Per RP",
+    subtitle = "Values above red horizontal line are Where floood fraction exceeds possible value of 100%"
+  )
+
+```
+
+After running pre-processing steps (remove admins with all 0s, remove admins with NAs, remove admins with 0 Variance) here is the breakdown:
+
+```{r}
+df_usgs_validity_stats <- df_usgs_adm2 |> 
+  mutate(
+    RV_impossible = RV > 1
+  ) |> 
+  group_by(iso3, pcode) |> 
+  summarise(
+    RV_impossible = any(RV_impossible),
+    .groups="drop_last"
+  ) |> 
+  mutate(
+    RV_status = replace_na(
+      ifelse(RV_impossible, "SFED > 1",
+             "SFED Valid"
+             ),"num_insufficient_variance"
+      )
+  ) |> 
+  group_by(
+    iso3, RV_status
+  ) |> 
+  summarise(
+    num_adm2s = n(),
+    .groups="drop_last"
+  ) |> 
+  mutate(
+    total_adm2s =sum(num_adm2s),
+    pct = num_adm2s/total_adm2s
+  ) 
+
+df_usgs_validity_stats_wide <- df_usgs_validity_stats |> 
+  pivot_wider(
+    names_from= RV_status,
+    values_from = c("num_adm2s","pct")
+  ) |> 
+  ungroup()  
+  
+df_usgs_validity_stats_wide |> 
+mutate(
+    num_adm2s_num_insufficient_variance =replace_na(num_adm2s_num_insufficient_variance,0)
+  ) |> 
+  gt$gt() |> 
+  gt$cols_hide(columns= c("total_adm2s","pct_num_insufficient_variance")) |> 
+  gt$cols_label(
+    `num_adm2s_SFED > 1` = "SFED Too High",
+    `num_adm2s_SFED Valid`= "SFED Good (<=100%)",
+    num_adm2s_num_insufficient_variance= "# Insufficient Variance"
+  ) |> 
+  gt$fmt_percent(
+    columns = c(starts_with ("pct"))
+      ) |> 
+    gt$cols_merge(
+    columns = c( `num_adm2s_SFED Valid`, `pct_SFED Valid`),
+    pattern = "{1} ({2})"
+  ) |> 
+    gt$cols_merge(
+    columns = c( `num_adm2s_SFED > 1` , `pct_SFED > 1`),
+    pattern = "{1} ({2})"
+  ) 
+
+
+
+```
+
+### How much does thresholding help?
+
+However, How much of this will be taken care of when we implement an upper return period threshold. As values above that will not be reflected in our data set.  So we reallly only have to concern ourselves with the admin 2 values represented by the red points
+
+```{r}
+#| fig.height: 6
+
+# df_impossible_summarised |> 
+#   filter(RP_min<26)
+
+df_impossible <- df_usgs_adm2 |> 
+  filter(RV>1)
+
+df_impossible |> 
+  group_by(iso3,pcode) |> 
+  filter(
+    RP==min(RP)
+  ) |> 
+  mutate(
+    RP_gt100 = RP>100
+  ) |> 
+  ggplot(
+    aes(x = iso3, y= RP)
+  )+
+  geom_boxplot(alpha=0.1)+
+  geom_jitter(alpha= 0.2,width = 0.1, aes(color=RP_gt100))+
+  
+  geom_hline(yintercept =100,
+             linetype = "dashed", 
+             color = hdx_hex("tomato-hdx"))+
+  coord_flip()+
+  scale_color_manual(
+    values= c("FALSE"=hdx_hex("tomato-hdx"),"TRUE"=hdx_hex("mint-hdx"))
+  )+
+  labs(
+    title = "At what RP does that admin exceed 100% SFED Flood Fraction",
+    subtitle = "If we apply 100 yr RP threshold we eliminate the problem for all the green admins"
+  )+
+  theme(
+    legend.position = "none"
+  )
+```
+
+The table below show's how the overall results do improve significantly once we implement a threshold of 100 year RP. However, the % admins still with issue (SFED exceeding 100% before 100 year RP) still seem quite significant
+
+```{r}
+admins_left_after_threshold <- df_impossible |> 
+  group_by(iso3,pcode) |> 
+  filter(
+    RP==min(RP)
+  ) |> 
+  mutate(
+    RP_lt100 = RP<=100
+  ) |> 
+  filter(RP_lt100) |> 
+  ungroup()
+
+
+
+df_processed_validity_stats <- df_usgs_adm2 |> 
+  mutate(
+    RV_impossible = RV > 1 & !(pcode %in%admins_left_after_threshold$pcode)
+  ) |> 
+  group_by(iso3, pcode) |> 
+  summarise(
+    RV_impossible = any(RV_impossible),
+    .groups="drop_last"
+  ) |> 
+  mutate(
+    RV_status = replace_na(
+      ifelse(RV_impossible, "SFED > 1",
+             "SFED Valid"
+             ),"num_insufficient_variance"
+      )
+  ) |> 
+  group_by(
+    iso3, RV_status
+  ) |> 
+  summarise(
+    num_adm2s = n(),
+    .groups="drop_last"
+  ) |> 
+  mutate(
+    total_adm2s =sum(num_adm2s),
+    pct = num_adm2s/total_adm2s
+  ) 
+
+
+df_processed_validity_stats_wide <- df_processed_validity_stats |> 
+  pivot_wider(
+    names_from= RV_status,
+    values_from = c("num_adm2s","pct")
+  ) |> 
+  ungroup()  
+  
+df_processed_validity_stats_wide |> 
+mutate(
+    num_adm2s_num_insufficient_variance =replace_na(num_adm2s_num_insufficient_variance,0)
+  ) |> 
+  gt$gt() |> 
+  gt$cols_hide(columns= c("total_adm2s","pct_num_insufficient_variance")) |> 
+  gt$cols_label(
+    `num_adm2s_SFED > 1` = "SFED Too High",
+    `num_adm2s_SFED Valid`= "SFED Good (<=100%)",
+    num_adm2s_num_insufficient_variance= "# Insufficient Variance"
+  ) |> 
+  gt$fmt_percent(
+    columns = c(starts_with ("pct"))
+      ) |> 
+    gt$cols_merge(
+    columns = c( `num_adm2s_SFED Valid`, `pct_SFED Valid`),
+    pattern = "{1} ({2})"
+  ) |> 
+    gt$cols_merge(
+    columns = c( `num_adm2s_SFED > 1` , `pct_SFED > 1`),
+    pattern = "{1} ({2})"
+  ) 
+```
+
+
+### Use Admin 1- Pooled regional analysis
+
+Pooled regional analysis to borrow information:
+
+Results below show much better fitting at admin 1 level
+
+```{r}
+#| fig.height: 10
+
+df_yr_max_adm1_filt <- df_yr_max_adm1 %>%
+  filter(pcode %in% substr(admins_left_after_threshold$pcode, 1, nchar(pcode)))
+
+
+df_usgs_adm1 <- df_yr_max_adm1 |> 
+  group_by(
+    iso3,
+    pcode
+  ) |> 
+  reframe(
+    RP = rps_to_calc,
+    RV = rp$rv_lp3(
+      x = value, 
+      return_period = rps_to_calc,
+      method = "usgs")
+  )
+
+
+df_usgs_adm1 |>
+  filter(RP<=100) |> 
+  ggplot(
+    aes(x= RP,y= RV,group = pcode)
+  )+
+  geom_line(alpha=0.2)+
+  scale_y_continuous(labels =scales::label_percent())+
+  facet_wrap(~iso3, scales= "free_y")+
+  labs(
+    title = "Admin 1 SFED Values by RP",
+    subtitle = "Generally much better fitting at admin 1 value - Especially up to 100 yr RP"
+  )+ theme(
+    axis.text.x = element_text(angle = 90,size=8),
+    axis.text.y = element_text(size=8)
+  )
+```
+
+
+If we subset admin 1 to just the ones containing problematic admin 2's we still see generally much better fitting
+
+```{r}
+df_usgs_adm1_bad_adm2_fits <- df_usgs_adm1 |> 
+  filter(
+    pcode %in% substr(admins_left_after_threshold$pcode, 1, nchar(pcode))
+         )
+
+df_usgs_adm1_bad_adm2_fits |> 
+  ggplot(
+    aes(x= RP,y= RV,group = pcode)
+  )+
+  geom_line(alpha=0.2)+
+  facet_wrap(~iso3, scales= "free_y")+
+  geom_hline(
+    yintercept = 1,
+    linetype = "dashed",
+    color = hdx_hex("tomato-hdx")
+    ) +
+  labs(
+    title = "Admin 1 SFED Values by RP",
+    subtitle = "Adm1's containing Adm2's with impossible values"
+  )
+
+
+
+
+
+
+```
+
+
+From our `admin 1` fits for `admin 1's` containing the problematic `admin 2's` we see only 1 `admin 1` unit that breaches 100% SFED before the 100 year RP. This is good news.
+
+```{r}
+#| fig.height: 6
+
+# df_impossible_summarised |> 
+#   filter(RP_min<26)
+
+df_impossible_adm1 <- df_usgs_adm1_bad_adm2_fits |> 
+  filter(RV>1)
+
+df_impossible_adm1 |> 
+  group_by(iso3,pcode) |> 
+  filter(
+    RP==min(RP)
+  ) |> 
+  mutate(
+    RP_gt100 = RP>100
+  ) |> 
+  ggplot(
+    aes(x = iso3, y= RP)
+  )+
+  # geom_boxplot(alpha=0.1)+
+  geom_point(alpha= 1, aes(color=RP_gt100))+
+  
+  geom_hline(yintercept =100,
+             linetype = "dashed", 
+             color = hdx_hex("tomato-hdx"))+
+  coord_flip()+
+  scale_color_manual(
+    values= c("FALSE"=hdx_hex("tomato-hdx"),"TRUE"=hdx_hex("mint-hdx"))
+  )+
+  scale_y_continuous(breaks= seq(0,800, by = 50))+
+  labs(
+    title = "Admin 1 fits contain only 1 value admin unit that exceed 100% "
+  )+
+  theme(
+    legend.position = "none"
+  )
+```
+
+Heres a breakdown of all admin 1's filtered to `HRP` countries so they match adm2 stats better. Not all of these necessarily matter because it's really just the problematic adm2's where we need to borrow this information
+
+```{r}
+df_adm1_usgs_validity_stats <- df_usgs_adm1 |> 
+  mutate(
+    RV_impossible = RV > 1,
+    RP<=100
+  ) |> 
+  group_by(iso3, pcode) |> 
+  summarise(
+    RV_impossible = any(RV_impossible),
+    .groups="drop_last"
+  ) |> 
+  mutate(
+    RV_status = ifelse(RV_impossible, "SFED > 1","SFED Valid"),
+    RV_status = replace_na(RV_status,"num_insufficient_variance")
+      
+  ) |> 
+  group_by(
+    iso3, RV_status
+  ) |> 
+  summarise(
+    num_adm1s = n(),
+    .groups="drop_last"
+  ) |> 
+  mutate(
+    total_adm1s =sum(num_adm1s),
+    pct = num_adm1s/total_adm1s
+  ) 
+
+df_adm1_usgs_validity_stats_wide <- df_adm1_usgs_validity_stats |> 
+  pivot_wider(
+    names_from= RV_status,
+    values_from = c("num_adm1s","pct"),
+  ) |> 
+  ungroup()  |> 
+  filter(
+    iso3 %in% df_valid$iso3
+  )
+  
+df_adm1_usgs_validity_stats_wide |> 
+  gt$gt() |> 
+  gt$cols_hide(columns= c("total_adm1s","num_adm1s_num_insufficient_variance","pct_num_insufficient_variance")) |> 
+  gt$cols_label(
+    `num_adm1s_SFED > 1` = "SFED Too High",
+   `num_adm1s_SFED Valid` =  "SFED Valid"
+  ) |> 
+  gt$fmt_percent(
+    columns = c(starts_with ("pct"))
+      ) |> 
+    gt$cols_merge(
+    columns = c( `num_adm1s_SFED > 1` , `pct_SFED > 1`),
+    pattern = "{1} ({2})"
+  ) |> 
+    gt$cols_merge(
+    columns = contains("Valid"),
+    pattern = "{1} ({2})"
+  ) |> 
+  gt$sub_missing(missing_text = 0)
+    
+```
+
+## Proposed Solutions
+
+### Solution 1 - Pooled regional analysis
+
+- Use admin 1 fits for admin 2 data that exceeds 100%. Implementation still a WIP. Will solve all problems except some admins in ethiopa
+
+### Solution 2
+
+modified from [PR comment](https://github.com/OCHA-DAP/ds-raster-stats/pull/7#issuecomment-2430540327)
+
+1. For each admin 2 fit the LP3
+2. Set a general upper threshold of 100 year RP for all admin 2s. Any vale above is set as `Inf`
+3. For each admin 2 that reaches >= 100% SFED before 100 year RP we find the exact RP that cooresponds to the 100% SFED value(in *most* cases that is still very high)
+4. For those problematic admins we set any value over this RP (per admin) to `Inf`
+
+*TBD*: try implementing 
+
+### Solution 3 - Mix in Empirical
+
+- Something like the above, but mixing in empirical RP values for problematic admin units.
+- Seems like could work, but need to think of implications and how to implement - obviously for the problematic admin units we could only get a maximum of 1 in 26 year RP (and could set any value above to `Inf`)
+
+```{r empirical}
+df_valid_empircal <- df_valid |> 
+  group_by(
+    iso3,pcode
+  ) |> 
+  mutate(
+    exceedance_prob  = rp$exceedance_probability(value),
+    RP = 1/exceedance_prob
+  ) |> 
+  ungroup()
+  
+df_empirical_funs <- df_valid_empircal |> 
+  group_by(
+    iso3,pcode
+  ) |> 
+  summarise(
+    fun_rv = list(approxfun(RP, value,method = "linear", rule =2,yright =Inf)),
+    run_rp = list(approxfun( value,RP,method = "linear",rule =2)),
+    .groups= "drop"
+  )
+
+df_empirical_rp <- df_empirical_funs |> 
+  group_by(
+     iso3, pcode
+  ) |> 
+  reframe(
+    RP = 1:26,
+    RV = map_dbl(RP,fun_rv)
+  )
+
+df_empirical_rp |> 
+  mutate(
+    to_replace = pcode %in% admins_left_after_threshold$pcode
+  ) |> 
+  ggplot(
+    aes(x= RP, y= RV, color= to_replace,group = pcode)
+  )+
+  geom_line(aes(alpha= to_replace))+
+  scale_y_continuous(label = scales::label_percent())+
+  scale_alpha_manual(values = c("FALSE"=0.2,"TRUE"=0.7))+
+  scale_color_manual(values = c("FALSE"=hdx_hex("sapphire-hdx"),
+                                "TRUE"= hdx_hex("tomato-hdx")))+
+  facet_wrap(~iso3)+
+  theme(
+    legend.position = "none"
+  )+
+  labs(
+    title = "Empirical RP & SFED Values",
+    subtitle = "Red lines are admins which we could pull RP values from empirical method"
+  )
+
+```
+
+
+
+### Solution 4 - Beta Distribution
+
+
+Let's try beta distribution as proposed in this [GH PR](https://github.com/OCHA-DAP/ds-raster-stats/pull/7). Here is the function and implementation 
+
+```{r}
+#| echo: true
+#| code-fold: show
+
+rv_beta <- function(x, return_period) {
+  # Fit Beta distribution
+  fit <- fitdistrplus::fitdist(x, "beta", method = "mge")
+  
+  # Calculate exceedance probabilities
+  exceedance_probs <- 1 - (1 / return_period)
+  
+  # Calculate return values
+  qbeta(exceedance_probs, 
+        shape1 = fit$estimate["shape1"], 
+        shape2 = fit$estimate["shape2"]
+  )
+  
+}
+
+df_beta_rps <- df_valid |> 
+  group_by(
+    iso3,
+    pcode
+  ) |> 
+  reframe(
+    RP = rps_to_calc,
+    RV = rv_beta(
+      x = value, 
+      return_period = rps_to_calc
+    )
+  )
+
+```
+
+and resulting plot... bounding seemed to work well, but values appear problematic. We know from empirical data that admins in `SSD` reach ~60% flood fraction in empirical 26-year record. Therefore do we really believe we reached return periods than thousands of years in the last couple of years in `SSD`?
+
+```{r}
+#| echo: true
+#| code-fold: show
+#| fig.height: 8
+
+df_beta_rps |> 
+  ggplot(
+    aes(x= RP,y= RV,group = pcode)
+  )+
+  geom_line(alpha=0.2)+
+  scale_y_continuous(labels =scales::label_percent())+
+  facet_wrap(~iso3, scales= "free_y")+
+  labs(
+    title = "Beta Distribution RPs vs RVs",
+    subtitle = "Admin 2 level Analysis"
+  )+ theme(
+    axis.text.x = element_text(angle = 90,size=8),
+    axis.text.y = element_text(size=8)
+  )
+
+```
+
+### Solution 4 - LP3 w/ Logit Transform
+
+```{r}
+#| echo: true
+#| code-fold: show
+
+box::use(moments)
+
+logit <- function(p) log(p / (1 - p))
+inv_logit <- function(x) exp(x) / (1 + exp(x))
+lp3_params_bounded <- function(x, imputation_method = "lowest") {
+  
+  # comment out `pmin()` call because i want to see if there are issues not skip them
+  # x <- pmin(pmax(x, 1e-6), 1 - 1e-6)  # Prevent logit issues at 0 or 1
+  
+  # Apply logit transformation
+  x_logit <- logit(x)
+  
+  list(
+    mu = mean(x_logit),
+    sd = sd(x_logit),
+    g = moments$skewness(x_logit)
+  )
+}
+
+rv_lp3_bounded <- function(x,
+                           return_period,
+                           method = "usgs",
+                           imputation_method = "lowest",
+                           params = NULL) {
+  if (imputation_method == "lowest") {
+    x[x == 0] <- min(x[x != 0])
+  }
+  
+  if (method == "usgs") {
+    # Use bounded parameters if not provided
+    if (is.null(params)) {
+      params <- lp3_params_bounded(x)
+    }
+    
+    g <- params$g
+    mu <- params$mu
+    stdev <- params$sd
+    
+    # Calculate exceedance probabilities and normal quantiles
+    rp_exceedance <- 1 / return_period
+    q_rp_norm <- qnorm(1 - rp_exceedance, mean = 0, sd = 1)  # Normal quantiles
+    
+    # Skewness adjustment
+    k_rp <- (2 / g) * (((q_rp_norm - (g / 6)) * (g / 6) + 1)^3 - 1)
+    
+    # Fitted values for return periods (logit space)
+    y_fit_rp <- mu + k_rp * stdev
+    
+    # Transform back to original scale using inverse logit
+    ret <- inv_logit(y_fit_rp)  
+    
+    # comment  out `pmin()` call for now because i want to see if there are issues 
+    # not skip them -- however could be good  for prod
+    # ret <- pmin(ret, 1)  # Ensure no values exceed 100%
+    
+  } else {
+    stop("Only 'usgs' method is supported in this bounded version.")
+  }
+  
+  return(ret)
+}
+
+
+df_lp3_logit_rps <- df_valid |> 
+  group_by(
+    iso3,
+    pcode
+  ) |> 
+  reframe(
+    RP = rps_to_calc,
+    RV = rv_lp3_bounded(
+      x = value, 
+      return_period = rps_to_calc
+    )
+  )
+```
+
+Below we see te LP3 Plots after the logit transform. For each country I've highlighted the 3 admins that reached the greated SFED flood fraction based on all 26 years of data. If you hover over those highlighted lines you can see the admin name and SFED value that was reached 
+
+```{r}
+#| fig.height: 9
+
+box::use(ggiraph)
+
+df_top3_admins_sfed <- df_valid_empircal |> 
+  arrange(
+    desc(value)
+  ) |> 
+  group_by(iso3,pcode) |> 
+  filter(value ==max(value)) |> 
+  group_by(iso3) |> 
+  slice_max(order_by = value, n=3)
+
+df_lp3_logit_rps_annotated <- df_lp3_logit_rps |> 
+  mutate(
+   top3_events_adm = pcode %in%df_top3_admins_sfed$pcode
+  ) |> 
+  left_join(
+    df_top3_admins_sfed |> 
+      select(
+        iso3,pcode, adm_en, max_value= value)
+      )
+
+
+
+
+
+p_lp3_logit <- df_lp3_logit_rps_annotated |> 
+  ggplot(
+    aes(x= RP,y= RV,group = pcode,color=top3_events_adm,alpha =top3_events_adm)
+  )+
+  geom_line()+
+  ggiraph$geom_line_interactive(
+    data = df_lp3_logit_rps_annotated |> 
+      filter(top3_events_adm) |> 
+      left_join(df_top3_admins_sfed), 
+    aes(
+      tooltip = glue$glue("Admin: {adm_en}
+                          Max SFED: {max_value}")
+        )
+  )+
+  scale_alpha_manual(values = c("TRUE"=1,"FALSE"=0.1))+
+  scale_y_continuous(labels =scales::label_percent())+
+  facet_wrap(~iso3, scales= "free_y")+
+  labs(
+    title = "LP3 Distribution with logit transform RV & RPs",
+    subtitle = "Admin 2 level Analysis"
+  )+ theme(
+    axis.text.x = element_text(angle = 90,size=8),
+    axis.text.y = element_text(size=8),
+    legend.position ="none"
+  )
+
+ggiraph$girafe(ggobj = p_lp3_logit)
+
+# df_lp3_logit_rps |> 
+#   filter(RP<100) |> 
+#   ggplot(
+#     aes(x= RP,y= RV,group = pcode)
+#   )+
+#   geom_line(alpha=0.2)+
+#   scale_y_continuous(labels =scales::label_percent())+
+#   facet_wrap(~iso3, scales= "free_y")+
+#   labs(
+#     title = "LP3 Distribution with logit transform RV & RPs",
+#     subtitle = "Admin 2 level Analysis"
+#   )+ theme(
+#     axis.text.x = element_text(angle = 90,size=8),
+#     axis.text.y = element_text(size=8)
+#   )
+
+```
+
+
+
+
+```{r}
+#| eval: false
+
+df_adm1_valid <- df_yr_max_adm1 %>%
+  group_by(iso3,pcode) |> 
+  filter(
+    !(all(is.na(value))),
+    !(all(value ==0))
+         ) |> 
+  ungroup()
+
+ldfck <- df_adm1_valid%>% 
+  split(.$pcode) 
+
+
+
+dfck <- df_adm1_valid |> 
+  group_by(
+    iso3,
+    pcode
+  ) |> 
+  reframe(
+    RP = rps_to_calc,
+    RV = rv_beta(
+      x = value, 
+      return_period = rps_to_calc
+      )
+  )
+
+dfck |> 
+  # filter(RP<=100) |> 
+  ggplot(
+    aes(x= RP,y= RV,group = pcode)
+  )+
+  geom_line(alpha=0.2)+
+  scale_y_continuous(labels =scales::label_percent())+
+  facet_wrap(~iso3, scales= "free_y")+
+  labs(
+    title = "Admin 1 SFED Values by RP",
+    subtitle = "Generally much better fitting at admin 1 value - Especially up to 100 yr RP"
+  )+ theme(
+    axis.text.x = element_text(angle = 90,size=8),
+    axis.text.y = element_text(size=8)
+  )
+  
+
+
+
+debugonce(rv_beta)
+rv_beta(ldfck[[67]]$value  ,rps_to_calc)
+map(1:length(ldfck),\(idx){
+  cat(idx,"\n")
+  rv_beta(ldfck[[idx]]$value  ,rps_to_calc)
+}
+)
+
+ldfck[[150]]
+rv_beta(ldfck[[3]]$value  ,rps_to_calc)
+
+ck |> 
+  filter(is.na(RV))
+```
+
+*TBD*
+
+
+### Additional Method Worth Trying
+
+- If using the LP3 distribution, my imputation method of filling 0's with next lowest value is probably not appropriate for applying at scale. Could look into treating the data as non-detect - left-censored data. 
+- My guess is that this will not fix a huge amount of the issues with SFED exceeding 100, but could fix some and overall still improve the method.
+
+
+## Appendix
+
+### Check % 0's
+
+Below we see that when there are more 0s in the historical record there is a higher chance that you cannot even fit the LP3 at all.
+
+I think explained by: LP3 requires a log transform, therefore 0 values are not allowed. As part of this methdo I replace 0 with lowest non-zero value. However you also cannot have a `variance=0`. Therefore, if you have `26` 0's obviously it won't work, but if you hav `25` 0's it fills those in with the next lowest value which would create a variance of 0 and also fail. This could keep happening even with lower numbers of 0's even if
+
+```{r}
+
+df_valid_0s <- df_valid |> 
+  group_by(
+    iso3, 
+    pcode
+  ) |> 
+  summarise(
+    sum_eq_0=sum(value==0),
+    sum_neq_0 = sum(value!=0)
+  ) |> 
+  ungroup()
+
+seq_num_0 <- 0:23
+
+ldf_num0_loop <- map(seq_num_0,\(tmp){
+  vt <- df_valid_0s |> 
+    filter(
+      sum_eq_0<=tmp
+    ) |> 
+    pull(pcode)
+  
+  dft <- df_usgs_adm2 |> 
+    filter(
+      !(pcode %in% vt)
+      )
+  
+  dft |> 
+    filter(RP<=100) |> 
+  mutate(
+    RV_impossible = RV > 1
+  ) |> 
+  group_by(iso3, pcode) |> 
+  summarise(
+    RV_impossible = any(RV_impossible),
+    .groups="drop_last"
+  ) |> 
+  mutate(
+    RV_status = ifelse(RV_impossible, "SFED > 1","SFED Valid"),
+             
+    RV_status = replace_na(
+      RV_status,
+      "num_insufficient_variance"
+    )
+  ) |> 
+    select(-RV_impossible) |> 
+    group_by(
+      RV_status
+    ) |> 
+    summarise(
+      num_adm2s = n(),
+      .groups="drop_last"
+    ) |> 
+
+    mutate(
+      total_adm2s =sum(num_adm2s),
+      pct = num_adm2s/total_adm2s
+    ) |> 
+    ungroup() |> 
+    group_by(RV_status) |> 
+    summarise(
+      pct = mean(pct)
+    ) |> 
+    mutate(
+      num_0_thresh = tmp
+    )
+}
+)
+
+df_num_loop <- ldf_num0_loop |> 
+  list_rbind() 
+  
+
+df_num_loop |> 
+filter(
+    # RV_status == "SFED > 1"
+    # RV_status == "SFED Valid"
+    RV_status == "num_insufficient_variance"
+  ) |> 
+  ggplot(
+    aes(x= num_0_thresh, y=pct)
+  )+
+  geom_point()+
+  labs(
+    title = "% fit failures based on number of 0s in historical record",
+    x= "Number of 0s in historical record",
+    y= "% values w/ insufficient data to fit SFED model"
+  )+
+  scale_y_continuous(labels = scales::label_percent())
+```
+
+
+### Minor blocking issues
+
+- Need to figure out what to do w/ `NULL`/`NA` values in our internal floodscan postgres DB
+- Polygon table needs to be updated in postgres db so that we can label admin pcodes with readable names in
+final dataset.
+
